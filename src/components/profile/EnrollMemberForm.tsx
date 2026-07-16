@@ -119,14 +119,14 @@ export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) 
 
   if (enrolledResult) {
     return (
-      <div className="space-y-5 p-4 pb-7 text-left text-text-primary">
-        <div className="flex flex-col items-center py-3 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-            <Sparkles className="h-7 w-7" />
+      <div className="space-y-4 p-4 pt-1 pb-2 text-left text-text-primary" aria-live="polite">
+        <div className="flex flex-col items-center py-2 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <Sparkles className="h-6 w-6" />
           </div>
-          <h3 className="mt-3 text-lg font-extrabold">Member enrolled</h3>
+          <h3 className="mt-2.5 text-lg font-extrabold">Member enrolled</h3>
           <p className="mt-1 max-w-sm text-xs leading-relaxed text-text-muted">
-            The registry profile is safely stored in PocketBase and is now available to authorized church users.
+            The profile is safely stored and available to authorized church users.
           </p>
         </div>
 
@@ -139,9 +139,13 @@ export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) 
           </div>
           <dl className="space-y-2 text-xs">
             <div className="flex justify-between gap-4"><dt className="text-text-muted">Full name</dt><dd className="text-right font-bold">{enrolledResult.fullName}</dd></div>
-            <div className="flex justify-between gap-4"><dt className="text-text-muted">Member ID</dt><dd className="font-mono font-bold text-gold-600 dark:text-gold-400">{enrolledResult.qrCode}</dd></div>
-            <div className="flex justify-between gap-4"><dt className="text-text-muted">Email</dt><dd className="truncate font-medium">{enrolledResult.email}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="shrink-0 text-text-muted">Member ID</dt><dd className="break-all text-right font-mono font-bold text-gold-600 dark:text-gold-400">{enrolledResult.qrCode}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="shrink-0 text-text-muted">Email</dt><dd className="min-w-0 break-all text-right font-medium">{enrolledResult.email}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-text-muted">Phone</dt><dd className="text-right font-medium">{enrolledResult.phone}</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-text-muted">Role</dt><dd className="font-bold capitalize">{enrolledResult.role.replaceAll('_', ' ')}</dd></div>
+            {(enrolledResult.cellGroupName || enrolledResult.departments.length > 0) && (
+              <div className="flex justify-between gap-4"><dt className="shrink-0 text-text-muted">Church group</dt><dd className="text-right font-medium">{enrolledResult.cellGroupName || enrolledResult.departments.join(', ')}</dd></div>
+            )}
           </dl>
         </GlassCard>
 
@@ -150,15 +154,17 @@ export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) 
           <p className="leading-relaxed">This enrollment does not create a login or password. A login account can be linked separately when the member needs app access.</p>
         </div>
 
-        <button type="button" onClick={onClose} className="w-full rounded-pill bg-gold-500 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold">
-          Return to registry
-        </button>
+        <div className="sticky bottom-0 z-10 -mx-4 bg-white px-4 pt-2 dark:bg-surface-100">
+          <button type="button" onClick={onClose} className="min-h-12 w-full rounded-pill bg-gold-500 px-4 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold">
+            Done — return to registry
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleEnroll} className="max-h-[80vh] space-y-4 overflow-y-auto p-4 pb-8 text-left">
+    <form onSubmit={handleEnroll} className="space-y-4 p-4 pt-1 pb-2 text-left">
       <p className="text-xs font-medium leading-relaxed text-text-secondary">
         Add a member to the central church registry. Required fields are marked below.
       </p>
@@ -223,9 +229,11 @@ export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) 
         </Field>
       </div>
 
-      <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center gap-2 rounded-pill bg-gold-500 py-3.5 text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold disabled:cursor-not-allowed disabled:opacity-50">
-        {isSubmitting ? 'Enrolling member…' : 'Enroll member'}
-      </button>
+      <div className="sticky bottom-0 z-10 -mx-4 bg-white px-4 pt-3 dark:bg-surface-100">
+        <button type="submit" disabled={isSubmitting} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-gold-500 px-4 py-3.5 text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold disabled:cursor-not-allowed disabled:opacity-50">
+          {isSubmitting ? 'Enrolling member…' : 'Enroll member'}
+        </button>
+      </div>
     </form>
   );
 }

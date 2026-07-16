@@ -470,6 +470,7 @@ export function MemberManagement() {
         isOpen={isEnrollOpen}
         onClose={() => setIsEnrollOpen(false)}
         title="Enroll New Member"
+        detents={['full']}
       >
         <EnrollMemberForm 
           onClose={() => setIsEnrollOpen(false)} 

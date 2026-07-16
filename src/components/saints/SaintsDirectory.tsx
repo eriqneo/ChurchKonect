@@ -1204,6 +1204,7 @@ export function SaintsDirectory() {
         isOpen={showAddMember}
         onClose={() => setShowAddMember(false)}
         title="Enroll New Saint"
+        detents={['full']}
       >
         <EnrollMemberForm
           onClose={() => setShowAddMember(false)}

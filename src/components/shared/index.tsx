@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
@@ -671,6 +672,18 @@ export function BottomSheet({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
+  // Sheets live above the complete app shell (including the fixed tab bar).
+  // Locking the page also prevents a swipe inside the sheet from moving the
+  // content behind it on iOS.
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen]);
+
   const isFullDetent = detents.includes('full') && !detents.includes('half');
 
   const handleDragEnd = (_: PointerEvent, info: { offset: { y: number }; velocity: { y: number } }) => {
@@ -679,10 +692,10 @@ export function BottomSheet({
     }
   };
 
-  return (
+  const sheet = (
     <AnimatePresence>
       {isOpen && (
-        <div id={id} className="absolute inset-0 z-100 overflow-hidden flex items-end justify-center pointer-events-none">
+        <div id={id} className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden pointer-events-none">
           {/* Background Overlay */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -704,13 +717,15 @@ export function BottomSheet({
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 1 }}
             onDragEnd={handleDragEnd}
-            className={`w-full max-w-[412px] rounded-t-sheet bg-white dark:bg-surface-100 p-5 pb-[calc(1.25rem+var(--safe-bottom))] flex flex-col z-10 shadow-sheet border-t border-theme-border pointer-events-auto ${
-              isFullDetent ? 'h-[90%]' : 'max-h-[75%]'
+            className={`w-full max-w-[412px] rounded-t-sheet bg-white dark:bg-surface-100 px-5 pt-3 pb-[max(1.25rem,var(--safe-bottom))] flex min-h-0 flex-col z-10 shadow-sheet border border-b-0 border-theme-border pointer-events-auto ${
+              isFullDetent
+                ? 'h-[calc(100dvh-0.5rem)] sm:h-[90dvh]'
+                : 'max-h-[min(75dvh,42rem)]'
             }`}
           >
             {/* Grab Handle */}
             <div
-              className="w-full flex justify-center mb-4 py-1 cursor-grab active:cursor-grabbing"
+              className="w-full flex shrink-0 justify-center mb-3 py-1 cursor-grab active:cursor-grabbing"
               style={{ touchAction: 'none' }}
               onPointerDown={(e) => dragControls.start(e)}
               onClick={onClose}
@@ -720,7 +735,7 @@ export function BottomSheet({
 
             {/* Title Block */}
             {title && (
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex shrink-0 items-center justify-between mb-3">
                 <h3 className={`${Typography.TITLE} text-theme-text`}>
                   {title}
                 </h3>
@@ -734,7 +749,7 @@ export function BottomSheet({
             )}
 
             {/* Scrollable sheet body content */}
-            <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 scrollbar-thin">
               {children}
             </div>
           </motion.div>
@@ -742,6 +757,8 @@ export function BottomSheet({
       )}
     </AnimatePresence>
   );
+
+  return typeof document === 'undefined' ? null : createPortal(sheet, document.body);
 }
 
 // ==========================================
