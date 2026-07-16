@@ -576,7 +576,7 @@ export function GlowTabBar({
   return (
     <div
       id={id}
-      className="absolute inset-x-0 bottom-0 h-[calc(var(--bottom-nav-height)+var(--safe-bottom))] box-border pb-[var(--safe-bottom)] pl-[max(0.75rem,var(--safe-left))] pr-[max(0.75rem,var(--safe-right))] bg-theme-bg/92 backdrop-blur-xl border-t border-theme-border flex items-center justify-around z-50 shadow-[0_-8px_24px_rgba(0,0,0,0.06)]"
+      className="absolute inset-x-0 bottom-0 h-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe))] box-border pb-[var(--bottom-nav-safe)] pl-[max(0.75rem,var(--safe-left))] pr-[max(0.75rem,var(--safe-right))] bg-theme-bg/92 backdrop-blur-xl border-t border-theme-border flex items-center justify-around z-50 shadow-[0_-8px_24px_rgba(0,0,0,0.06)]"
     >
       {tabs.map((tab) => {
         const isCenter = tab.id === centerTabId;

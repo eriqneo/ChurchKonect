@@ -118,6 +118,21 @@
 
   /* Native-style navigation row; the device home-indicator inset is added separately. */
   --bottom-nav-height: 4rem;
+  --bottom-nav-safe: var(--safe-bottom);
+}
+
+/*
+ * Installed iOS PWAs can visually double the home-indicator clearance when a
+ * full safe-area inset is added to an already constrained standalone viewport.
+ * Keep at least 16px below tab targets, but reclaim 12px from larger iPhone
+ * insets so the navigation remains grounded without touching the indicator.
+ */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    :root {
+      --bottom-nav-safe: max(1rem, calc(var(--safe-bottom) - 0.75rem));
+    }
+  }
 }
 
 .dark, html.dark {
@@ -391,5 +406,4 @@ html.light .shimmer-base {
 .bg-surface-400 {
   background-color: var(--surface-400) !important;
 }
-
 
