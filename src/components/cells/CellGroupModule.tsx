@@ -959,7 +959,7 @@ export function CellGroupModule() {
                 variants={staggerChildren.container}
                 initial="initial"
                 animate="animate"
-                className="space-y-3 flex-1 overflow-y-auto max-h-[380px] scrollbar-none pb-4"
+                className="space-y-3 flex-1 pb-4"
               >
                 {filteredCellGroups.length === 0 ? (
                   <div className="py-12 text-center bg-white/[0.01] border border-white/5 rounded-2xl p-4">
@@ -987,57 +987,64 @@ export function CellGroupModule() {
                       <motion.div key={group.localId} variants={staggerChildren.child}>
                       <GlassCard
                         id={`cell-card-${group.localId}`}
-                        pressable
                         onPress={() => { triggerHaptic(); setSelectedCellForDetail(group); }}
-                        className="p-4 border-l-4 border-l-gold-500/40 hover:border-l-gold-500 transition-all flex flex-col gap-2 relative group"
+                        className="p-4 border-l-4 border-l-gold-500/40 hover:border-l-gold-500 hover:shadow-md transition-all flex flex-col gap-3 group cursor-pointer"
                       >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
                             <Avatar name={leaderName} size="md" />
-                            <div>
-                              <h4 className="text-sm font-extrabold text-text-primary group-hover:text-gold-400 transition-colors">
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-extrabold text-text-primary group-hover:text-gold-500 transition-colors truncate">
                                 {group.name}
                               </h4>
-                              <p className="text-[10px] text-text-secondary font-medium">
-                                Leader: <strong className="text-text-primary">{leaderName}</strong>
+                              <p className="text-[10px] text-text-secondary font-medium truncate mt-0.5">
+                                Leader: <strong className="text-text-primary font-bold">{leaderName}</strong>
                               </p>
                             </div>
                           </div>
 
-                          <div className="flex flex-col items-end gap-1.5">
-                            <span className={`text-[9px] font-black tracking-widest px-2 py-0.5 rounded-full ${
+                          <div className="flex-shrink-0">
+                            <span className={`text-[9px] font-black tracking-wide px-2 py-1 rounded-full ${
                               isActive ? 'bg-semantic-success/10 text-semantic-success' : 'bg-surface-200 text-text-muted'
                             }`}>
                               {isActive ? 'Active' : 'Inactive'}
-                            </span>
-                            <span className="text-[10px] font-bold text-text-muted bg-white/5 px-2 py-0.5 rounded-md">
-                              {groupMemberCount} members
                             </span>
                           </div>
                         </div>
 
                         {/* Meeting details strip */}
-                        <div className="grid grid-cols-2 gap-1 bg-white/[0.02] p-2 rounded-lg border border-white/5 text-[10px] text-text-secondary font-medium mt-1">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5 text-gold-500/75" />
-                            <span>{group.meetingDay || 'Wednesday'} at {group.meetingTime || '19:30'}</span>
+                        <div className="grid grid-cols-2 gap-2 bg-surface-200/45 dark:bg-white/[0.02] px-3 py-2.5 rounded-xl border border-theme-border text-[10px] text-text-secondary font-semibold">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Calendar className="w-3.5 h-3.5 text-gold-500 flex-shrink-0" />
+                            <span className="truncate">{group.meetingDay || 'Wednesday'} at {group.meetingTime || '19:30'}</span>
                           </div>
-                          <div className="flex items-center gap-1 truncate">
-                            <MapPin className="w-3.5 h-3.5 text-gold-500/75" />
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <MapPin className="w-3.5 h-3.5 text-gold-500 flex-shrink-0" />
                             <span className="truncate">{group.location || 'House Fellowship'}</span>
                           </div>
                         </div>
 
-                        {/* Quick Action Button overlay */}
-                        <span
-                          id={`edit-group-btn-${group.localId}`}
-                          onClick={(e) => handleOpenEditGroup(group, e)}
-                          className="absolute bottom-12 right-4 text-[10px] font-extrabold text-gold-500 hover:underline cursor-pointer bg-black/40 px-2.5 py-1 rounded-md border border-gold-500/20"
-                          role="button"
-                          tabIndex={0}
-                        >
-                          Configure
-                        </span>
+                        <div className="flex items-center justify-between gap-3 pt-0.5">
+                          <div className="flex items-center gap-3 min-w-0 text-[10px] font-bold text-text-secondary">
+                            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                              <Users className="w-3.5 h-3.5 text-cathedral-500" />
+                              {groupMemberCount} {groupMemberCount === 1 ? 'member' : 'members'}
+                            </span>
+                            <span className="w-1 h-1 rounded-full bg-surface-400 flex-shrink-0" />
+                            <span className="truncate">{districtName}</span>
+                          </div>
+
+                          <button
+                            id={`edit-group-btn-${group.localId}`}
+                            type="button"
+                            onClick={(e) => handleOpenEditGroup(group, e)}
+                            className="h-9 px-3 rounded-xl inline-flex items-center gap-1.5 flex-shrink-0 bg-cathedral-50 dark:bg-gold-500/10 border border-cathedral-100 dark:border-gold-500/20 text-cathedral-700 dark:text-gold-400 text-[10px] font-extrabold hover:bg-cathedral-100 dark:hover:bg-gold-500/15 transition-colors cursor-pointer"
+                            aria-label={`Configure ${group.name}`}
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                            Configure
+                          </button>
+                        </div>
                       </GlassCard>
                       </motion.div>
                     );
