@@ -13,7 +13,7 @@ import {
 } from '../shared';
 import { staggerChildren } from '../../lib/animations';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
-import { type PocketBaseMember, usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
+import { type PocketBaseMember, useChurchStructure, usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
 import { EnrollMemberForm } from '../profile/EnrollMemberForm';
 import { 
   Users, 
@@ -88,14 +88,12 @@ interface Cell {
   name: string;
   leader: string;
   memberCount: number;
-  status: 'Active' | 'Pending Report' | 'Missed';
+  status: 'Active' | 'Inactive';
+  meetingDay?: string;
+  meetingTime?: string;
+  location?: string;
+  sectionName?: string;
 }
-
-const INITIAL_CELLS: Cell[] = [
-  { id: 'c1', name: 'Alpha Cell', leader: 'Brother Michael', memberCount: 8, status: 'Active' },
-  { id: 'c2', name: 'Hope Fellowship', leader: 'Sister Clara', memberCount: 6, status: 'Pending Report' },
-  { id: 'c3', name: 'North Youth Rock', leader: 'Brother Timothy', memberCount: 5, status: 'Missed' }
-];
 
 interface District {
   id: string;
@@ -105,10 +103,6 @@ interface District {
   cells: string[];
 }
 
-const INITIAL_DISTRICTS: District[] = [
-  { id: 'd1', name: 'North District', pastor: 'Pastor Abraham', cellCount: 5, cells: ['Alpha Cell', 'Hope Fellowship', 'Grace Gather', 'Hebron House', 'Ebenezer Cell'] },
-  { id: 'd2', name: 'South District', pastor: 'Pastor Stephen', cellCount: 3, cells: ['Covenant Cell', 'Faith Light', 'Zion Rock'] }
-];
 
 interface Pillar {
   id: string;
@@ -118,12 +112,6 @@ interface Pillar {
   iconName: 'Worship' | 'Media' | 'Youth' | 'Children';
 }
 
-const INITIAL_PILLARS: Pillar[] = [
-  { id: 'p1', name: 'Worship Ministry', head: 'Sister Grace', membersCount: 24, iconName: 'Worship' },
-  { id: 'p2', name: 'Media & Tech', head: 'Brother Felix', membersCount: 12, iconName: 'Media' },
-  { id: 'p3', name: 'Youth Ministry', head: 'Sister Martha', membersCount: 35, iconName: 'Youth' },
-  { id: 'p4', name: 'Children Care', head: 'Sister Abigail', membersCount: 15, iconName: 'Children' }
-];
 
 const PILLAR_ICONS = {
   Worship: <Music className="w-6 h-6 text-gold-500" />,
@@ -141,7 +129,42 @@ export function SaintsDirectory() {
     isRefreshing: membersRefreshing,
     error: membersError
   } = usePocketBaseMembers();
+  const {
+    cellGroups: remoteCellGroups,
+    sections: remoteSections,
+    departments: remoteDepartments,
+    isLoading: structuresLoading
+  } = useChurchStructure();
   const members = remoteMembers.filter((member) => member.status === 'Active').map(toDirectoryMember);
+  const cells: Cell[] = remoteCellGroups.map((group) => ({
+    id: group.remoteId,
+    name: group.name,
+    leader: group.leaderName || 'No leader assigned',
+    memberCount: remoteMembers.filter((member) => member.cellGroupId === group.remoteId && member.status === 'Active').length,
+    status: group.status,
+    meetingDay: group.meetingDay,
+    meetingTime: group.meetingTime,
+    location: group.location,
+    sectionName: group.sectionName
+  }));
+  const districts: District[] = remoteSections.map((section) => {
+    const sectionCells = remoteCellGroups.filter((group) => group.sectionId === section.localId);
+    return {
+      id: section.remoteId || section.localId,
+      name: section.name,
+      pastor: section.pastorName || 'No pastor assigned',
+      cellCount: sectionCells.length,
+      cells: sectionCells.map((group) => group.name)
+    };
+  });
+  const pillarIcons: Pillar['iconName'][] = ['Worship', 'Media', 'Youth', 'Children'];
+  const pillars: Pillar[] = remoteDepartments.map((department, index) => ({
+    id: department.remoteId || department.localId,
+    name: department.name,
+    head: department.headName || 'No head assigned',
+    membersCount: remoteMembers.filter((member) => member.departmentIds.includes(department.remoteId || department.localId) && member.status === 'Active').length,
+    iconName: pillarIcons[index % pillarIcons.length]
+  }));
   const canManageMembers = user?.role === 'lead_pastor' || user?.role === 'administrator';
   // Navigation tabs list
   const TABS = [
@@ -158,11 +181,6 @@ export function SaintsDirectory() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
   
-  // Other structure modules remain local until their backend module is implemented.
-  const [cells, setCells] = useState<Cell[]>(INITIAL_CELLS);
-  const [districts, setDistricts] = useState<District[]>(INITIAL_DISTRICTS);
-  const [pillars, setPillars] = useState<Pillar[]>(INITIAL_PILLARS);
-
   // Detail Modal States
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [selectedCell, setSelectedCell] = useState<Cell | null>(null);
@@ -180,14 +198,6 @@ export function SaintsDirectory() {
 
   // New item forms modal states
   const [showAddMember, setShowAddMember] = useState(false);
-  const [showAddCell, setShowAddCell] = useState(false);
-  const [newCellForm, setNewCellForm] = useState({
-    name: '',
-    leader: '',
-    memberCount: 6,
-    status: 'Active' as Cell['status']
-  });
-
   // Filter bottom sheet state
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState<Record<string, boolean>>({
@@ -282,32 +292,6 @@ export function SaintsDirectory() {
       clearTimeout(pressTimerRef.current);
       pressTimerRef.current = null;
     }
-  };
-
-  // Save New Cell
-  const handleCreateCell = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCellForm.name || !newCellForm.leader) {
-      showToast('Please fill in required fields');
-      return;
-    }
-    const added: Cell = {
-      id: `c${Date.now()}`,
-      name: newCellForm.name,
-      leader: newCellForm.leader,
-      memberCount: Number(newCellForm.memberCount) || 0,
-      status: newCellForm.status
-    };
-
-    setCells([...cells, added]);
-    setShowAddCell(false);
-    setNewCellForm({
-      name: '',
-      leader: '',
-      memberCount: 6,
-      status: 'Active'
-    });
-    showToast(`Successfully created ${added.name}!`);
   };
 
   // Filter application & Reset
@@ -619,29 +603,27 @@ export function SaintsDirectory() {
                ========================================== */}
             {activeTab === 'cells' && (
               <div className="space-y-4">
-                {filteredCells.length === 0 ? (
+                {structuresLoading ? (
+                  <div className="flex flex-col items-center justify-center space-y-3 py-12 text-center">
+                    <div className="h-9 w-9 animate-spin rounded-full border-2 border-gold-500/20 border-t-gold-500" />
+                    <p className={`${Typography.CAPTION} text-text-muted`}>Loading confirmed church structures…</p>
+                  </div>
+                ) : filteredCells.length === 0 ? (
                   <div className="py-12 text-center flex flex-col items-center justify-center space-y-3">
                     <div className="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center text-text-muted">
                       <Flame className="w-6 h-6" />
                     </div>
                     <div>
                       <h3 className={`${Typography.SUBTITLE} text-text-primary`}>No cell groups found</h3>
-                      <p className={`${Typography.CAPTION} text-text-muted mt-1`}>No cells matched your query.</p>
+                      <p className={`${Typography.CAPTION} text-text-muted mt-1`}>{cells.length === 0 ? 'No cell groups have been configured yet.' : 'No cells matched your query.'}</p>
                     </div>
-                    <button
-                      onClick={() => setShowAddCell(true)}
-                      className="px-4 py-1.5 bg-gold-500 text-black font-bold text-xs rounded-pill"
-                    >
-                      Create Cell
-                    </button>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-3.5">
                     {filteredCells.map((cell) => {
                       const statusVariant = {
                         'Active': 'sage',
-                        'Pending Report': 'gold',
-                        'Missed': 'cathedral'
+                        'Inactive': 'muted'
                       }[cell.status] as any;
 
                       return (
@@ -674,16 +656,6 @@ export function SaintsDirectory() {
                       );
                     })}
 
-                    {/* "+ New Cell" card */}
-                    <button
-                      onClick={() => { triggerHaptic(); setShowAddCell(true); }}
-                      className="border border-dashed border-gold-500/40 rounded-card p-3.5 flex flex-col items-center justify-center min-h-[110px] gap-2 hover:bg-gold-500/5 hover:border-gold-500/60 active:scale-[0.98] transition-all text-center cursor-pointer"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-gold-500/10 flex items-center justify-center text-gold-500">
-                        <Plus className="w-5 h-5 stroke-[2.5]" />
-                      </div>
-                      <span className="text-xs font-bold text-gold-500">Create Cell</span>
-                    </button>
                   </div>
                 )}
               </div>
@@ -1082,7 +1054,7 @@ export function SaintsDirectory() {
             <div className="p-4 bg-gold-500/10 border border-gold-500/20 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
                 <span className={`${Typography.OVERLINE} text-gold-400`}>
-                  District House Fellowship
+                  {selectedCell.sectionName || 'House Fellowship'}
                 </span>
                 <AccentBadge label={selectedCell.status} variant="sage" size="sm" />
               </div>
@@ -1090,7 +1062,7 @@ export function SaintsDirectory() {
                 {selectedCell.name}
               </h3>
               <p className="text-xs text-theme-text-secondary">
-                Meets every Wednesday evening at 7:00 PM for Worship, Word & Communion.
+                Meets {selectedCell.meetingDay || 'on the configured day'} at {selectedCell.meetingTime || 'the configured time'}.
               </p>
             </div>
 
@@ -1104,12 +1076,12 @@ export function SaintsDirectory() {
                 <span className="text-text-primary font-bold">{selectedCell.memberCount} active saints</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
-                <span className="text-text-muted font-bold">Gathering Format</span>
-                <span className="text-text-primary font-bold">Hybrid / In-Person</span>
+                <span className="text-text-muted font-bold">Host location</span>
+                <span className="text-text-primary font-bold text-right">{selectedCell.location || 'Not specified'}</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
-                <span className="text-text-muted font-bold">Weekly reports submitted</span>
-                <span className="text-semantic-success font-bold">98% compliance</span>
+                <span className="text-text-muted font-bold">Registry status</span>
+                <span className="text-semantic-success font-bold">{selectedCell.status}</span>
               </div>
             </div>
 
@@ -1210,81 +1182,6 @@ export function SaintsDirectory() {
           onClose={() => setShowAddMember(false)}
           onSuccess={() => { void refreshMembers(); }}
         />
-      </BottomSheet>
-
-      {/* Form B: Create Cell */}
-      <BottomSheet
-        isOpen={showAddCell}
-        onClose={() => setShowAddCell(false)}
-        title="Establish New Cell Group"
-      >
-        <form onSubmit={handleCreateCell} className="space-y-4 pb-8 text-left">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Cell Name *</label>
-            <input
-              type="text"
-              required
-              value={newCellForm.name}
-              onChange={(e) => setNewCellForm({ ...newCellForm, name: e.target.value })}
-              placeholder="e.g. Grace Fellowship"
-              className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Host / Leader *</label>
-            <input
-              type="text"
-              required
-              value={newCellForm.leader}
-              onChange={(e) => setNewCellForm({ ...newCellForm, leader: e.target.value })}
-              placeholder="e.g. Sister Abigail"
-              className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Start Members</label>
-              <input
-                type="number"
-                min="1"
-                value={newCellForm.memberCount}
-                onChange={(e) => setNewCellForm({ ...newCellForm, memberCount: Number(e.target.value) })}
-                className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Report Status</label>
-              <select
-                value={newCellForm.status}
-                onChange={(e) => setNewCellForm({ ...newCellForm, status: e.target.value as any })}
-                className="w-full bg-surface-100 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-              >
-                <option value="Active">Active</option>
-                <option value="Pending Report">Pending Report</option>
-                <option value="Missed">Missed</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-4 flex gap-3">
-            <button
-              type="submit"
-              className="flex-1 py-3 bg-gold-500 text-black font-extrabold text-xs rounded-pill text-center cursor-pointer shadow-lg hover:bg-gold-400"
-            >
-              Create Cell
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAddCell(false)}
-              className="flex-1 py-3 bg-surface-100 text-text-primary font-bold text-xs rounded-pill text-center"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
       </BottomSheet>
 
       {/* --------------------------------------

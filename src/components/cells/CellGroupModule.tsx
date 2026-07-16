@@ -5,7 +5,6 @@ import {
   db, 
   generateUUID, 
   createLocalRecord,
-  type CellGroupRecord,
   type MemberRecord,
   type CellMeetingRecord,
   type CellAttendanceRecord,
@@ -26,6 +25,11 @@ import {
 } from '../shared';
 import { staggerChildren, useCountUp } from '../../lib/animations';
 import { isRoleSimulatorEnabled } from '../../lib/auth/roles';
+import {
+  type PocketBaseCellGroup,
+  useChurchStructure,
+  usePocketBaseMembers
+} from '../../lib/db/pocketbaseHooks';
 import { 
   Check, 
   SlidersHorizontal,
@@ -72,6 +76,22 @@ interface ConfettiParticle {
 
 export function CellGroupModule() {
   const { user, role } = useCurrentUser();
+  const {
+    members: allMembers,
+    updateMember,
+    refreshMembers
+  } = usePocketBaseMembers();
+  const {
+    cellGroups,
+    sections,
+    departments,
+    saveCellGroup,
+    saveSection,
+    saveDepartment,
+    isLoading: structureLoading,
+    isRefreshing: structureRefreshing,
+    error: structureError
+  } = useChurchStructure();
 
   // 1. Role View Emulator Mode: 'admin' | 'leader' | 'pastor'
   const [currentRoleView, setCurrentRoleView] = useState<'admin' | 'leader' | 'pastor'>('leader');
@@ -82,7 +102,7 @@ export function CellGroupModule() {
     if (roleId) {
       if (roleId === 'administrator') {
         setCurrentRoleView('admin');
-      } else if (roleId === 'lead_pastor') {
+      } else if (roleId === 'lead_pastor' || roleId === 'district_pastor') {
         setCurrentRoleView('pastor');
       } else {
         setCurrentRoleView('leader');
@@ -93,35 +113,9 @@ export function CellGroupModule() {
   // --------------------------------------
   // Live Database Queries via useLiveQuery
   // --------------------------------------
-  const allMembers = useLiveQuery(async () => {
-    const raw = await db.members.filter(m => m.deletedAt === undefined).toArray();
-    const seen = new Set<string>();
-    return raw.filter(m => {
-      if (!m.localId || seen.has(m.localId)) return false;
-      seen.add(m.localId);
-      return true;
-    });
-  }) || [];
-
-  const cellGroups = useLiveQuery(async () => {
-    const raw = await db.cellGroups.toArray();
-    const seen = new Set<string>();
-    return raw.filter(g => {
-      if (!g.localId || seen.has(g.localId)) return false;
-      seen.add(g.localId);
-      return true;
-    });
-  }) || [];
-
-  const sections = useLiveQuery(async () => {
-    const raw = await db.sections.toArray();
-    const seen = new Set<string>();
-    return raw.filter(s => {
-      if (!s.localId || seen.has(s.localId)) return false;
-      seen.add(s.localId);
-      return true;
-    });
-  }) || [];
+  const localVisitors = useLiveQuery(async () => db.members
+    .filter((member) => !member.remoteId && member.role === 'visitor' && member.deletedAt === undefined)
+    .toArray()) || [];
 
   const cellMeetings = useLiveQuery(async () => {
     const raw = await db.cellMeetings.toArray();
@@ -176,14 +170,22 @@ export function CellGroupModule() {
   // ======================================================================
   // ----------------------------------------------------------------------
   const [adminSearch, setAdminSearch] = useState('');
-  const [selectedCellForDetail, setSelectedCellForDetail] = useState<CellGroupRecord | null>(null);
+  const [selectedCellForDetail, setSelectedCellForDetail] = useState<PocketBaseCellGroup | null>(null);
   
   // Sheet States
   const [isGroupSheetOpen, setIsGroupSheetOpen] = useState(false);
   const [isAssignSheetOpen, setIsAssignSheetOpen] = useState(false);
+  const [isStructureSheetOpen, setIsStructureSheetOpen] = useState(false);
+  const [structureTab, setStructureTab] = useState<'section' | 'department'>('section');
+  const [structureName, setStructureName] = useState('');
+  const [structureDetail, setStructureDetail] = useState('');
+  const [structureLeaderId, setStructureLeaderId] = useState('');
+  const [isSavingStructure, setIsSavingStructure] = useState(false);
   
   // Create / Edit Group Form State
-  const [editingGroup, setEditingGroup] = useState<CellGroupRecord | null>(null);
+  const [editingGroup, setEditingGroup] = useState<PocketBaseCellGroup | null>(null);
+  const [isSavingGroup, setIsSavingGroup] = useState(false);
+  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
   const [formName, setFormName] = useState('');
   const [formLeaderId, setFormLeaderId] = useState('');
   const [formSectionId, setFormSectionId] = useState('');
@@ -200,7 +202,7 @@ export function CellGroupModule() {
   // Filter leaders list in CMS form (only members with 'cell_leader' or 'administrator' roles)
   const candidateLeaders = useMemo(() => {
     return allMembers.filter(m => {
-      const isQualified = m.role === 'cell_leader' || m.role === 'administrator' || m.role === 'lead_pastor';
+      const isQualified = Boolean(m.userId) && (m.role === 'cell_leader' || m.role === 'administrator' || m.role === 'lead_pastor');
       const matchesSearch = m.fullName.toLowerCase().includes(leaderSearchQuery.toLowerCase()) || 
                             m.email.toLowerCase().includes(leaderSearchQuery.toLowerCase());
       return isQualified && matchesSearch;
@@ -225,8 +227,8 @@ export function CellGroupModule() {
     triggerHaptic();
     setEditingGroup(null);
     setFormName('');
-    setFormLeaderId(allMembers.find(m => m.role === 'cell_leader')?.localId || '');
-    setFormSectionId(sections[0]?.localId || 'sec-central');
+    setFormLeaderId(allMembers.find(m => m.role === 'cell_leader' && m.userId)?.userId || '');
+    setFormSectionId(sections.find((section) => section.status !== 'Inactive')?.localId || '');
     setFormMeetingDay('Wednesday');
     setFormMeetingTime('19:30');
     setFormLocation('');
@@ -235,8 +237,53 @@ export function CellGroupModule() {
     setIsGroupSheetOpen(true);
   };
 
+  const handleOpenStructureSetup = () => {
+    triggerHaptic();
+    setStructureTab('section');
+    setStructureName('');
+    setStructureDetail('');
+    setStructureLeaderId('');
+    setIsStructureSheetOpen(true);
+  };
+
+  const handleSaveStructure = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!structureName.trim()) {
+      showToast(`${structureTab === 'section' ? 'Section' : 'Department'} name is required.`);
+      return;
+    }
+    setIsSavingStructure(true);
+    const leaderMember = allMembers.find((member) => member.userId === structureLeaderId);
+    try {
+      if (structureTab === 'section') {
+        await saveSection({
+          name: structureName,
+          code: structureDetail,
+          pastorId: structureLeaderId || undefined,
+          pastorMemberId: leaderMember?.remoteId
+        });
+      } else {
+        await saveDepartment({
+          name: structureName,
+          description: structureDetail,
+          headId: structureLeaderId || undefined,
+          headMemberId: leaderMember?.remoteId
+        });
+      }
+      showToast(`${structureTab === 'section' ? 'Section' : 'Department'} "${structureName}" created.`);
+      setStructureName('');
+      setStructureDetail('');
+      setStructureLeaderId('');
+    } catch (error) {
+      console.error('[Cells] Structure setup failed:', error);
+      showToast(error instanceof Error ? error.message : 'Could not save the church structure.');
+    } finally {
+      setIsSavingStructure(false);
+    }
+  };
+
   // Open Edit Group form
-  const handleOpenEditGroup = (group: CellGroupRecord, e: React.MouseEvent) => {
+  const handleOpenEditGroup = (group: PocketBaseCellGroup, e: React.MouseEvent) => {
     e.stopPropagation(); // prevent opening details
     triggerHaptic();
     setEditingGroup(group);
@@ -260,62 +307,42 @@ export function CellGroupModule() {
     }
     triggerHaptic(20);
 
-    const groupData = {
-      name: formName,
-      leaderId: formLeaderId,
-      sectionId: formSectionId,
-      meetingDay: formMeetingDay,
-      meetingTime: formMeetingTime,
-      location: formLocation,
-      status: formStatus,
-      syncStatus: 'pending' as const,
-      updatedAt: new Date().toISOString()
-    };
-
-    if (editingGroup) {
-      // Edit mode
-      const dbGroup = await db.cellGroups.where('localId').equals(editingGroup.localId).first();
-      if (dbGroup && dbGroup.id) {
-        await db.cellGroups.update(dbGroup.id, groupData);
-        showToast(`Cell Group "${formName}" updated successfully!`);
-        // If details panel is open, update details
-        if (selectedCellForDetail && selectedCellForDetail.localId === editingGroup.localId) {
-          setSelectedCellForDetail({ ...selectedCellForDetail, ...groupData });
-        }
-      }
-    } else {
-      // Create mode
-      const newCell = createLocalRecord<CellGroupRecord>({
+    setIsSavingGroup(true);
+    try {
+      const saved = await saveCellGroup({
+        remoteId: editingGroup?.remoteId,
+        expectedUpdatedAt: editingGroup?.updatedAt,
         name: formName,
         leaderId: formLeaderId,
+        leaderMemberId: allMembers.find((member) => member.userId === formLeaderId)?.remoteId,
         sectionId: formSectionId,
         meetingDay: formMeetingDay,
         meetingTime: formMeetingTime,
         location: formLocation,
         status: formStatus
       });
-      await db.cellGroups.add(newCell);
-      showToast(`Cell Group "${formName}" created successfully!`);
-    }
-
-    setIsGroupSheetOpen(false);
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+      showToast(`Cell Group "${formName}" ${editingGroup ? 'updated' : 'created'} successfully!`);
+      if (selectedCellForDetail?.remoteId === saved.remoteId) setSelectedCellForDetail(saved);
+      setIsGroupSheetOpen(false);
+    } catch (error) {
+      console.error('[Cells] Save group failed:', error);
+      showToast(error instanceof Error ? error.message : 'Could not save the cell group.');
+    } finally {
+      setIsSavingGroup(false);
     }
   };
 
   // Remove member from group
-  const handleRemoveMemberFromGroup = async (memberLocalId: string) => {
+  const handleRemoveMemberFromGroup = async (memberRemoteId: string) => {
     triggerHaptic(20);
-    const mRecord = await db.members.where('localId').equals(memberLocalId).first();
-    if (mRecord && mRecord.id) {
-      const oldName = mRecord.fullName;
-      await db.members.update(mRecord.id, {
+    const member = allMembers.find((record) => record.remoteId === memberRemoteId);
+    if (!member) return;
+    try {
+      await updateMember(member.remoteId, {
         cellGroupId: undefined,
-        syncStatus: 'pending',
-        updatedAt: new Date().toISOString()
+        sectionId: undefined
       });
-      showToast(`${oldName} removed from cell group roster.`);
+      showToast(`${member.fullName} removed from cell group roster.`);
       
       // Auto Audit Log
       await db.auditLogs.add({
@@ -323,13 +350,12 @@ export function CellGroupModule() {
         userId: user.localId,
         userName: user.name,
         action: 'cell_member_remove',
-        details: `Removed ${oldName} from cell group roster.`,
+        details: `Removed ${member.fullName} from cell group roster.`,
         createdAt: new Date().toISOString()
       });
-
-      if (syncEngine.isOnline()) {
-        syncEngine.syncNow().catch(console.error);
-      }
+    } catch (error) {
+      console.error('[Cells] Remove roster member failed:', error);
+      showToast(error instanceof Error ? error.message : 'Could not remove the member.');
     }
   };
 
@@ -354,38 +380,40 @@ export function CellGroupModule() {
     }
     triggerHaptic(25);
 
+    setIsSavingAssignments(true);
     const nowStr = new Date().toISOString();
-    let assignedCount = 0;
-
-    for (const mId of selectedMemberIdsForAssign) {
-      const mRecord = await db.members.where('localId').equals(mId).first();
-      if (mRecord && mRecord.id) {
-        // Enforce ONE cell group: overwrite their cellGroupId
-        await db.members.update(mRecord.id, {
-          cellGroupId: selectedCellForDetail.localId,
-          syncStatus: 'pending',
-          updatedAt: nowStr
-        });
-        assignedCount++;
-      }
-    }
-
-    showToast(`Successfully assigned ${assignedCount} members to "${selectedCellForDetail.name}"!`);
+    try {
+      const results = await Promise.allSettled(selectedMemberIdsForAssign.map((memberId) =>
+        updateMember(memberId, {
+          cellGroupId: selectedCellForDetail.remoteId,
+          sectionId: selectedCellForDetail.sectionId || undefined
+        }, { refresh: false })
+      ));
+      const assignedCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failedCount = results.length - assignedCount;
+      await refreshMembers();
+      showToast(failedCount
+        ? `${assignedCount} assigned; ${failedCount} need another attempt.`
+        : `Successfully assigned ${assignedCount} members to "${selectedCellForDetail.name}"!`);
     
-    // Auto Audit Log
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: user.localId,
-      userName: user.name,
-      action: 'cell_members_assign',
-      details: `Assigned ${assignedCount} members to cell group ${selectedCellForDetail.name}.`,
-      createdAt: nowStr
-    });
+      // Local audit remains informational until the audit-log backend module.
+      await db.auditLogs.add({
+        localId: generateUUID(),
+        userId: user.localId,
+        userName: user.name,
+        action: 'cell_members_assign',
+        details: `Assigned ${assignedCount} members to cell group ${selectedCellForDetail.name}.`,
+        createdAt: nowStr
+      });
 
-    setSelectedMemberIdsForAssign([]);
-    setIsAssignSheetOpen(false);
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+      const failedIds = selectedMemberIdsForAssign.filter((_, index) => results[index].status === 'rejected');
+      setSelectedMemberIdsForAssign(failedIds);
+      if (!failedCount) setIsAssignSheetOpen(false);
+    } catch (error) {
+      console.error('[Cells] Roster assignment failed:', error);
+      showToast(error instanceof Error ? error.message : 'Could not assign members.');
+    } finally {
+      setIsSavingAssignments(false);
     }
   };
 
@@ -411,6 +439,7 @@ export function CellGroupModule() {
   // ======================================================================
   // ----------------------------------------------------------------------
   const [leaderCellGroupId, setLeaderCellGroupId] = useState<string>('');
+  const canOperateMeeting = roleId === 'cell_leader' || (isRoleSimulatorEnabled && currentRoleView === 'leader');
 
   // Auto-select cell group for leader
   useEffect(() => {
@@ -418,11 +447,16 @@ export function CellGroupModule() {
       const leaderCell = cellGroups.find(c => c.leaderId === user.localId);
       if (leaderCell) {
         setLeaderCellGroupId(leaderCell.localId);
-      } else {
+      } else if (isRoleSimulatorEnabled) {
         setLeaderCellGroupId(cellGroups[0].localId);
+      } else {
+        const ownMembership = allMembers.find((member) => member.userId === user.localId);
+        setLeaderCellGroupId(ownMembership?.cellGroupId || '');
       }
+    } else {
+      setLeaderCellGroupId('');
     }
-  }, [cellGroups, user.localId]);
+  }, [allMembers, cellGroups, user.localId]);
 
   // Current active cell group record
   const currentLeaderCell = useMemo(() => {
@@ -436,8 +470,11 @@ export function CellGroupModule() {
 
   // Roster of members pre-registered to this group
   const cellGroupRoster = useMemo(() => {
-    return allMembers.filter(m => m.cellGroupId === leaderCellGroupId);
-  }, [allMembers, leaderCellGroupId]);
+    return [
+      ...allMembers.filter(m => m.cellGroupId === leaderCellGroupId),
+      ...localVisitors.filter(m => m.cellGroupId === leaderCellGroupId)
+    ];
+  }, [allMembers, leaderCellGroupId, localVisitors]);
 
   // Meeting Timer State
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -468,6 +505,10 @@ export function CellGroupModule() {
 
   // Start meeting procedure
   const handleStartMeeting = async () => {
+    if (!canOperateMeeting) {
+      showToast('Only the assigned cell leader can start attendance.');
+      return;
+    }
     if (!leaderCellGroupId) {
       showToast('No cell group selected.');
       return;
@@ -717,9 +758,9 @@ export function CellGroupModule() {
     return cellGroups.filter(c => !activeAndCompletedMeetings.includes(c.localId));
   }, [cellGroups, cellMeetings]);
 
-  const handleSendReminder = async (cellGroup: CellGroupRecord) => {
+  const handleSendReminder = async (cellGroup: PocketBaseCellGroup) => {
     triggerHaptic(20);
-    const leaderName = allMembers.find(m => m.localId === cellGroup.leaderId)?.fullName || 'Cell Leader';
+    const leaderName = cellGroup.leaderName || allMembers.find(m => m.userId === cellGroup.leaderId)?.fullName || 'Cell Leader';
 
     // Create Notification in local DB for the leader
     await db.notifications.add({
@@ -926,8 +967,21 @@ export function CellGroupModule() {
               {/* CMS Overview Header */}
               <SectionTitle
                 title="Cell Groups"
+                badge={structureError ? { label: 'Cached', variant: 'gold' } : structureRefreshing ? { label: 'Syncing', variant: 'muted' } : { label: 'Synced', variant: 'sage' }}
                 action={{ label: "+ Create Group", onPress: handleOpenCreateGroup }}
               />
+
+              <button
+                type="button"
+                onClick={handleOpenStructureSetup}
+                className="flex min-h-11 w-full items-center justify-between rounded-xl border border-theme-border bg-theme-card px-3.5 text-left transition-colors hover:bg-surface-200"
+              >
+                <span>
+                  <span className="block text-xs font-extrabold text-text-primary">Structure setup</span>
+                  <span className="mt-0.5 block text-[10px] text-text-muted">{sections.length} sections · {departments.length} departments</span>
+                </span>
+                <span className="text-[10px] font-bold text-gold-600 dark:text-gold-400">Configure</span>
+              </button>
 
               {/* Bento Stats row */}
               <div className="grid grid-cols-2 gap-3">
@@ -961,7 +1015,12 @@ export function CellGroupModule() {
                 animate="animate"
                 className="space-y-3 flex-1 pb-4"
               >
-                {filteredCellGroups.length === 0 ? (
+                {structureLoading ? (
+                  <div className="py-12 text-center rounded-2xl border border-theme-border bg-theme-card p-4">
+                    <div className="mx-auto mb-3 h-9 w-9 animate-spin rounded-full border-2 border-gold-500/20 border-t-gold-500" />
+                    <p className="text-xs font-semibold text-text-secondary">Loading confirmed cell groups…</p>
+                  </div>
+                ) : filteredCellGroups.length === 0 ? (
                   <div className="py-12 text-center bg-white/[0.01] border border-white/5 rounded-2xl p-4">
                     <Users className="w-10 h-10 text-text-muted mx-auto mb-2" />
                     <p className="text-xs font-semibold text-text-secondary">No cell groups found</p>
@@ -970,12 +1029,12 @@ export function CellGroupModule() {
                 ) : (
                   filteredCellGroups.map((group) => {
                     // Gather leader
-                    const leader = allMembers.find(m => m.localId === group.leaderId);
-                    const leaderName = leader ? leader.fullName : 'No leader';
+                    const leader = allMembers.find(m => m.userId === group.leaderId);
+                    const leaderName = group.leaderName || leader?.fullName || 'No leader';
 
                     // Gather district
                     const district = sections.find(s => s.localId === group.sectionId);
-                    const districtName = district ? district.name : 'Unknown District';
+                    const districtName = group.sectionName || district?.name || 'No section';
 
                     // Gather member count
                     const groupMemberCount = allMembers.filter(m => m.cellGroupId === group.localId).length;
@@ -1086,7 +1145,7 @@ export function CellGroupModule() {
                   <div>
                     <h3 className="text-base font-black text-text-primary">{selectedCellForDetail.name}</h3>
                     <p className="text-xs text-text-secondary mt-1 font-semibold">
-                      District: <span className="text-gold-500 font-extrabold">{sections.find(s => s.localId === selectedCellForDetail.sectionId)?.name || 'Central District'}</span>
+                      Section: <span className="text-gold-500 font-extrabold">{selectedCellForDetail.sectionName || sections.find(s => s.localId === selectedCellForDetail.sectionId)?.name || 'Not assigned'}</span>
                     </p>
                   </div>
                   <AccentBadge 
@@ -1138,7 +1197,7 @@ export function CellGroupModule() {
                   ) : (
                     allMembers.filter(m => m.cellGroupId === selectedCellForDetail.localId).map((member) => (
                       <div
-                        key={member.localId}
+                        key={member.remoteId}
                         className="h-12 flex items-center justify-between px-3 rounded-xl hover:bg-white/[0.02] border-b border-white/[0.02] transition-colors"
                       >
                         <div className="flex items-center gap-2.5">
@@ -1153,8 +1212,8 @@ export function CellGroupModule() {
 
                         {/* Remove Action Button */}
                         <button
-                          id={`remove-member-${member.localId}`}
-                          onClick={() => handleRemoveMemberFromGroup(member.localId)}
+                          id={`remove-member-${member.remoteId}`}
+                          onClick={() => handleRemoveMemberFromGroup(member.remoteId)}
                           className="w-8 h-8 rounded-full bg-white/[0.03] hover:bg-cathedral-500/10 text-text-muted hover:text-cathedral-400 flex items-center justify-center transition-colors cursor-pointer"
                           title="Remove member from roster"
                         >
@@ -1169,6 +1228,97 @@ export function CellGroupModule() {
           )}
 
           {/* CREATE/EDIT CELL GROUP SHEET */}
+          <BottomSheet
+            id="cms-structure-setup-sheet"
+            isOpen={isStructureSheetOpen}
+            onClose={() => setIsStructureSheetOpen(false)}
+            title="Church Structure Setup"
+            detents={['full']}
+          >
+            <div className="space-y-4 p-1 pb-4 text-left">
+              <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-200 p-1">
+                {(['section', 'department'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => {
+                      setStructureTab(tab);
+                      setStructureName('');
+                      setStructureDetail('');
+                      setStructureLeaderId('');
+                    }}
+                    className={`min-h-10 rounded-lg text-xs font-bold capitalize ${structureTab === tab ? 'bg-white text-text-primary shadow-sm dark:bg-surface-100' : 'text-text-muted'}`}
+                  >
+                    {tab === 'section' ? 'Sections' : 'Departments'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-text-muted">Configured {structureTab === 'section' ? 'sections' : 'departments'}</span>
+                <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-theme-border bg-theme-card p-1.5">
+                  {(structureTab === 'section' ? sections : departments).length === 0 ? (
+                    <p className="p-5 text-center text-xs text-text-muted">None configured yet.</p>
+                  ) : (structureTab === 'section' ? sections : departments).map((record) => (
+                    <div key={record.localId} className="flex min-h-12 items-center justify-between rounded-lg px-3 py-2 hover:bg-surface-200/60">
+                      <span className="min-w-0">
+                        <strong className="block truncate text-xs text-text-primary">{record.name}</strong>
+                        <span className="block truncate text-[9px] text-text-muted">
+                          {structureTab === 'section'
+                            ? ('pastorName' in record && record.pastorName) || ('code' in record && record.code) || 'No pastor assigned'
+                            : ('headName' in record && record.headName) || 'No head assigned'}
+                        </span>
+                      </span>
+                      <AccentBadge label={record.status || 'Active'} variant={record.status === 'Inactive' ? 'muted' : 'sage'} size="sm" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveStructure} className="space-y-3 border-t border-theme-border pt-4">
+                <h4 className="text-xs font-extrabold text-text-primary">Add {structureTab === 'section' ? 'a section' : 'a department'}</h4>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Name *</label>
+                  <input
+                    required
+                    value={structureName}
+                    onChange={(event) => setStructureName(event.target.value)}
+                    placeholder={structureTab === 'section' ? 'e.g. North Section' : 'e.g. Worship Ministry'}
+                    className="h-11 w-full rounded-xl border border-theme-border bg-surface-100 px-3.5 text-sm text-text-primary outline-none focus:border-gold-500 focus:ring-2 focus:ring-gold-500/30"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">{structureTab === 'section' ? 'Short code' : 'Description'}</label>
+                  <input
+                    value={structureDetail}
+                    onChange={(event) => setStructureDetail(event.target.value)}
+                    placeholder={structureTab === 'section' ? 'e.g. NORTH' : 'Purpose of this department'}
+                    className="h-11 w-full rounded-xl border border-theme-border bg-surface-100 px-3.5 text-sm text-text-primary outline-none focus:border-gold-500 focus:ring-2 focus:ring-gold-500/30"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">{structureTab === 'section' ? 'Pastor' : 'Department head'} (optional)</label>
+                  <select
+                    value={structureLeaderId}
+                    onChange={(event) => setStructureLeaderId(event.target.value)}
+                    className="h-11 w-full rounded-xl border border-theme-border bg-surface-100 px-3 text-sm text-text-primary outline-none focus:border-gold-500 focus:ring-2 focus:ring-gold-500/30"
+                  >
+                    <option value="">Not assigned</option>
+                    {allMembers.filter((member) => Boolean(member.userId) && (
+                      structureTab === 'section'
+                        ? ['lead_pastor', 'district_pastor', 'administrator'].includes(member.role)
+                        : ['lead_pastor', 'department_head', 'administrator'].includes(member.role)
+                    )).map((member) => <option key={member.remoteId} value={member.userId}>{member.fullName}</option>)}
+                  </select>
+                  <p className="text-[9px] leading-relaxed text-text-muted">Only registry profiles linked to an app login can hold leadership responsibility.</p>
+                </div>
+                <button type="submit" disabled={isSavingStructure} className="min-h-12 w-full rounded-pill bg-gold-500 px-4 text-xs font-extrabold text-black shadow-glow-gold disabled:opacity-60">
+                  {isSavingStructure ? 'Saving to PocketBase…' : `Create ${structureTab}`}
+                </button>
+              </form>
+            </div>
+          </BottomSheet>
+
           <BottomSheet
             id="cms-create-group-sheet"
             isOpen={isGroupSheetOpen}
@@ -1196,10 +1346,10 @@ export function CellGroupModule() {
                     onChange={(e) => setFormSectionId(e.target.value)}
                     className="w-full h-11 bg-surface-100 border border-white/5 rounded-xl px-3 text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 font-semibold"
                   >
-                    {sections.map(s => (
+                    {sections.filter((section) => section.status !== 'Inactive').map(s => (
                       <option key={s.localId} value={s.localId}>{s.name}</option>
                     ))}
-                    {sections.length === 0 && <option value="sec-central">Central District</option>}
+                    {sections.length === 0 && <option value="">No section configured</option>}
                   </select>
                 </div>
 
@@ -1233,15 +1383,15 @@ export function CellGroupModule() {
                     ) : (
                       candidateLeaders.map(m => (
                         <button
-                          key={m.localId}
+                          key={m.remoteId}
                           type="button"
-                          onClick={() => { setFormLeaderId(m.localId); setLeaderSearchQuery(m.fullName); }}
+                          onClick={() => { setFormLeaderId(m.userId || ''); setLeaderSearchQuery(m.fullName); }}
                           className={`w-full text-left p-2 hover:bg-white/[0.03] text-xs transition-colors flex items-center justify-between cursor-pointer ${
-                            formLeaderId === m.localId ? 'text-gold-500 font-bold bg-white/[0.01]' : 'text-text-secondary'
+                            formLeaderId === m.userId ? 'text-gold-500 font-bold bg-white/[0.01]' : 'text-text-secondary'
                           }`}
                         >
                           <span>{m.fullName} ({m.role.replace('_', ' ')})</span>
-                          {formLeaderId === m.localId && <Check className="w-3.5 h-3.5" />}
+                          {formLeaderId === m.userId && <Check className="w-3.5 h-3.5" />}
                         </button>
                       ))
                     )}
@@ -1289,9 +1439,10 @@ export function CellGroupModule() {
 
               <button
                 type="submit"
-                className="w-full h-12 bg-gold-500 hover:bg-gold-400 text-black font-extrabold text-xs rounded-pill shadow-glow-gold transition-all cursor-pointer mt-2"
+                disabled={isSavingGroup}
+                className="w-full h-12 bg-gold-500 hover:bg-gold-400 text-black font-extrabold text-xs rounded-pill shadow-glow-gold transition-all cursor-pointer mt-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {editingGroup ? "Apply Configuration" : "Deploy Cell Group"}
+                {isSavingGroup ? 'Saving to PocketBase…' : editingGroup ? "Apply Configuration" : "Create Cell Group"}
               </button>
             </form>
           </BottomSheet>
@@ -1319,13 +1470,13 @@ export function CellGroupModule() {
                   <p className="text-[10px] text-text-muted text-center py-6 font-semibold">No candidates found</p>
                 ) : (
                   unassignedOrReassignableMembers.map(m => {
-                    const isSelected = selectedMemberIdsForAssign.includes(m.localId);
+                    const isSelected = selectedMemberIdsForAssign.includes(m.remoteId);
                     const currentCell = cellGroups.find(c => c.localId === m.cellGroupId);
 
                     return (
                       <div
-                        key={m.localId}
-                        onClick={() => handleToggleMemberSelection(m.localId)}
+                        key={m.remoteId}
+                        onClick={() => handleToggleMemberSelection(m.remoteId)}
                         className="p-2.5 hover:bg-white/[0.02] flex items-center justify-between transition-colors cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5">
@@ -1363,9 +1514,10 @@ export function CellGroupModule() {
                 <button
                   type="button"
                   onClick={handleSaveAssignments}
-                  className="h-11 bg-gold-500 hover:bg-gold-400 text-black text-xs font-extrabold rounded-xl transition-all cursor-pointer"
+                  disabled={isSavingAssignments}
+                  className="h-11 bg-gold-500 hover:bg-gold-400 text-black text-xs font-extrabold rounded-xl transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Add Selected ({selectedMemberIdsForAssign.length})
+                  {isSavingAssignments ? 'Saving…' : `Add Selected (${selectedMemberIdsForAssign.length})`}
                 </button>
               </div>
             </div>
@@ -1381,11 +1533,11 @@ export function CellGroupModule() {
         <div className="space-y-4 flex-1 flex flex-col justify-between">
           
           <div className="space-y-4 text-left">
-            {/* Header / Cell group selector for leaders simulation */}
+            {/* Header / assigned cell group */}
             <div className="flex items-start justify-between">
               <div>
                 <SectionTitle
-                  title={currentLeaderCell?.name || "Alpha Cell"}
+                  title={currentLeaderCell?.name || "My Cell Group"}
                   badge={{
                     label: `${cellGroupRoster.length} members`,
                     variant: "muted"
@@ -1412,7 +1564,17 @@ export function CellGroupModule() {
             </div>
 
             {/* Sub-Header / Active Meeting Banner */}
-            {!activeMeeting ? (
+            {!currentLeaderCell ? (
+              <div className="rounded-xl border border-theme-border bg-theme-card p-5 text-center">
+                <Users className="mx-auto mb-2 h-7 w-7 text-text-muted" />
+                <p className="text-xs font-bold text-text-primary">No cell group assigned</p>
+                <p className="mt-1 text-[10px] text-text-muted">An administrator can assign your registry profile to a cell group.</p>
+              </div>
+            ) : !canOperateMeeting ? (
+              <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-xs text-text-secondary">
+                You can view your cell roster and schedule here. Attendance controls are available only to the assigned cell leader.
+              </div>
+            ) : !activeMeeting ? (
               <button
                 id="start-fellowship-btn"
                 onClick={handleStartMeeting}
@@ -1503,7 +1665,8 @@ export function CellGroupModule() {
                         <button
                           id={`toggle-btn-${member.localId}`}
                           onClick={() => handleCycleAttendance(member.localId)}
-                          className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-[0.9]"
+                          disabled={!canOperateMeeting}
+                          className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-[0.9] disabled:cursor-default"
                           title="Cycle through Present / Excused / Absent"
                         >
                           <AnimatePresence mode="wait">
@@ -1550,7 +1713,7 @@ export function CellGroupModule() {
                 )}
 
                 {/* Inline Seeker/Visitor form */}
-                {!isAddingVisitor ? (
+                {canOperateMeeting && (!isAddingVisitor ? (
                   <button
                     id="add-visitor-trigger"
                     onClick={() => { triggerHaptic(); setIsAddingVisitor(true); }}
@@ -1599,7 +1762,7 @@ export function CellGroupModule() {
                       </button>
                     </div>
                   </motion.form>
-                )}
+                ))}
               </motion.div>
             </div>
           </div>
@@ -1777,7 +1940,7 @@ export function CellGroupModule() {
 
               <div className="space-y-1.5 max-h-[100px] overflow-y-auto pr-1">
                 {delinquentCells.map(c => {
-                  const lName = allMembers.find(m => m.localId === c.leaderId)?.fullName || 'Cell Leader';
+                  const lName = c.leaderName || allMembers.find(m => m.userId === c.leaderId)?.fullName || 'Cell Leader';
                   return (
                     <div key={c.localId} className="flex justify-between items-center bg-black/25 px-2.5 py-1.5 rounded-lg border border-white/5">
                       <div className="text-[10px] text-text-primary">

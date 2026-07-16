@@ -95,3 +95,24 @@ For a real app login, create a regular record under **Collections → users** wi
 - `status` set to `active`.
 
 The versioned source schema is in `pb_migrations/202607161930_create_users_auth.js`.
+
+## Member registry and cell structures
+
+The member directory, departments, sections, cell groups, and roster assignments use PocketBase
+as their canonical source. Confirmed server reads are cached per signed-in user for short outages;
+configuration changes require a live server acknowledgement.
+
+To reconcile and test the member registry schema:
+
+```bash
+npm run backend:bootstrap-members -- --email=YOUR_SUPERUSER_EMAIL
+```
+
+To reconcile cell-structure relations and run disposable role/security tests:
+
+```bash
+npm run backend:bootstrap-cell-structure -- --email=YOUR_SUPERUSER_EMAIL
+```
+
+Both commands prompt for the password without echoing or storing it. Cell meetings, attendance,
+visitors, and weekly reports are intentionally reserved for the following offline-outbox module.

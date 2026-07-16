@@ -12,6 +12,7 @@ export interface LocalFirstRecord {
   createdAt: string;       // ISO string
   updatedAt: string;
   deletedAt?: string;      // soft delete
+  cacheOwnerId?: string;   // authenticated user whose confirmed server result is cached
 }
 
 export interface UserRecord extends LocalFirstRecord {
@@ -37,21 +38,32 @@ export interface MemberRecord extends LocalFirstRecord {
 export interface DepartmentRecord extends LocalFirstRecord {
   name: string;
   headId: string;          // user's localId
+  headMemberId?: string;
+  headName?: string;
+  description?: string;
+  status?: 'Active' | 'Inactive';
 }
 
 export interface SectionRecord extends LocalFirstRecord {
   name: string;
   pastorId: string;        // user's localId
+  pastorMemberId?: string;
+  pastorName?: string;
+  code?: string;
+  status?: 'Active' | 'Inactive';
 }
 
 export interface CellGroupRecord extends LocalFirstRecord {
   name: string;
   leaderId: string;        // user's localId
+  leaderMemberId?: string;
   sectionId: string;       // section's localId
   meetingDay?: string;     // e.g., 'Wednesday'
   meetingTime?: string;    // e.g., '19:00'
   location?: string;
   status?: 'Active' | 'Inactive';
+  leaderName?: string;
+  sectionName?: string;
 }
 
 export interface CellMeetingRecord extends LocalFirstRecord {

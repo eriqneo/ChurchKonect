@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "backend:bootstrap-auth": "node scripts/pocketbase/bootstrap-auth.mjs",
     "backend:bootstrap-members": "node scripts/pocketbase/bootstrap-members.mjs",
+    "backend:bootstrap-cell-structure": "node scripts/pocketbase/bootstrap-cell-structure.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name churchkonect",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
