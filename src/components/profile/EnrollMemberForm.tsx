@@ -1,23 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { motion } from 'motion/react';
-import { db } from '../../lib/db/churchConnectDB';
-import { usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
-import { useCurrentUser } from '../../lib/db/hooks';
+import { useEffect, useState } from 'react';
+import { Calendar, Check, Copy, Mail, MapPin, Phone, ShieldCheck, Sparkles, User } from 'lucide-react';
+import { AccentBadge, GlassCard } from '../shared';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
+import {
+  type PocketBaseMember,
+  useMemberReferences,
+  usePocketBaseMembers
+} from '../../lib/db/pocketbaseHooks';
 import { useToast } from '../shared/toast/useToast';
-import { GlassCard, AccentBadge } from '../shared';
-import { User, Phone, Mail, Calendar, MapPin, Check, Eye, HelpCircle, ShieldAlert, Sparkles, Copy } from 'lucide-react';
 
-const DEPARTMENTS_LIST = [
-  'Intercessory',
-  'ICT',
-  'Protocol',
-  'Media',
-  'Ushering',
-  'Choir',
-  'Worship Leader',
-  'Youth Crew',
-  'Children Ministry'
+type RegistryRole = 'member' | 'cell_leader' | 'department_head' | 'administrator';
+
+const ROLE_OPTIONS: Array<{ id: RegistryRole; label: string }> = [
+  { id: 'member', label: 'Member' },
+  { id: 'cell_leader', label: 'Cell Leader' },
+  { id: 'department_head', label: 'Department Head' },
+  { id: 'administrator', label: 'Administrator' }
 ];
 
 interface EnrollMemberFormProps {
@@ -25,67 +23,56 @@ interface EnrollMemberFormProps {
   onSuccess?: () => void;
 }
 
+function friendlyError(error: unknown): string {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { message?: string; data?: Record<string, { message?: string }> } }).response;
+    const fieldMessage = response?.data && Object.values(response.data).find((item) => item?.message)?.message;
+    return fieldMessage || response?.message || 'The member could not be enrolled.';
+  }
+  return error instanceof Error ? error.message : 'The member could not be enrolled.';
+}
+
 export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) {
+  const { user } = useAuth();
   const { enrollMember } = usePocketBaseMembers();
-  const { role: currentUserRole } = useCurrentUser();
+  const { departments, cellGroups, isLoading: referencesLoading } = useMemberReferences();
   const toast = useToast();
 
-  // Load Cells & Sections from Database
-  const cellGroups = useLiveQuery(() => db.cellGroups.toArray()) || [];
-  const sections = useLiveQuery(() => db.sections.toArray()) || [];
-
-  // Form Field States
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'member' | 'worker' | 'admin'>('member');
+  const [role, setRole] = useState<RegistryRole>('member');
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [cellGroupId, setCellGroupId] = useState('');
   const [sectionId, setSectionId] = useState('');
   const [sectionName, setSectionName] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [address, setAddress] = useState('');
-
-  // Enroll Credentials Screen
-  const [enrolledResult, setEnrolledResult] = useState<any | null>(null);
+  const [enrolledResult, setEnrolledResult] = useState<PocketBaseMember | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Auto-fill Section based on selected Cell Group
-  useEffect(() => {
-    if (cellGroupId) {
-      const selectedCell = cellGroups.find(c => c.localId === cellGroupId);
-      if (selectedCell) {
-        setSectionId(selectedCell.sectionId);
-        const associatedSection = sections.find(s => s.localId === selectedCell.sectionId);
-        if (associatedSection) {
-          setSectionName(associatedSection.name);
-        } else {
-          setSectionName('');
-        }
-      }
-    } else {
-      setSectionId('');
-      setSectionName('');
-    }
-  }, [cellGroupId, cellGroups, sections]);
+  const isLeadPastor = user?.role === 'lead_pastor';
 
-  const handleToggleDepartment = (dept: string) => {
-    if (selectedDepartments.includes(dept)) {
-      setSelectedDepartments(selectedDepartments.filter(d => d !== dept));
-    } else {
-      setSelectedDepartments([...selectedDepartments, dept]);
-    }
+  useEffect(() => {
+    const selectedCell = cellGroups.find((cell) => cell.id === cellGroupId);
+    setSectionId(selectedCell?.sectionId || '');
+    setSectionName(selectedCell?.sectionName || '');
+  }, [cellGroupId, cellGroups]);
+
+  const toggleDepartment = (departmentId: string) => {
+    setSelectedDepartments((current) => current.includes(departmentId)
+      ? current.filter((id) => id !== departmentId)
+      : [...current, departmentId]);
   };
 
-  const handleEnroll = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEnroll = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!fullName.trim() || !phone.trim() || !email.trim()) {
-      toast.error('Please fill in all required fields.');
+      toast.error('Full name, phone, and email are required.');
       return;
     }
-
-    if (role === 'admin' && currentUserRole?.id !== 'lead_pastor') {
-      toast.error('Only the Lead Pastor is authorized to assign Admin roles.');
+    if (role === 'administrator' && !isLeadPastor) {
+      toast.error('Only the Lead Pastor can assign the Administrator role.');
       return;
     }
 
@@ -96,230 +83,121 @@ export function EnrollMemberForm({ onClose, onSuccess }: EnrollMemberFormProps) 
         phone,
         email,
         role,
-        departments: role === 'worker' ? selectedDepartments : [],
+        departments: selectedDepartments,
         cellGroupId: cellGroupId || undefined,
         sectionId: sectionId || undefined,
         dateOfBirth: dateOfBirth || undefined,
         address: address || undefined
       });
-
-      if (result) {
-        toast.success(`Success! Enrolled ${fullName}`);
-        setEnrolledResult(result);
-        if (onSuccess) onSuccess();
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Enrollment failed. Please try again.');
+      setEnrolledResult(result);
+      toast.success(`${result.fullName} was added to the registry.`);
+      onSuccess?.();
+    } catch (error) {
+      console.error('[Members] Enrollment failed:', error);
+      toast.error(friendlyError(error));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleCopyCredentials = () => {
+  const copyRegistryDetails = async () => {
     if (!enrolledResult) return;
-    const textToCopy = `ChurchConnect Enrollment
-Name: ${enrolledResult.fullName}
-Member ID: ${enrolledResult.qrCode}
-Login Email: ${enrolledResult.email}
-Temp Password: ${enrolledResult.passwordSimulated}
-Role: ${enrolledResult.role.toUpperCase()}`;
-    
-    navigator.clipboard.writeText(textToCopy);
-    toast.success('Credentials copied to clipboard!');
+    const details = [
+      'ChurchConnect member registration',
+      `Name: ${enrolledResult.fullName}`,
+      `Member ID: ${enrolledResult.qrCode}`,
+      `Email: ${enrolledResult.email}`,
+      `Role: ${enrolledResult.role.replaceAll('_', ' ')}`
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(details);
+      toast.success('Registration details copied.');
+    } catch {
+      toast.error('Copy is unavailable on this device.');
+    }
   };
 
-  // Render credentials card for admin to copy
   if (enrolledResult) {
     return (
-      <div className="p-4 space-y-6 text-left text-text-primary">
-        <div className="flex flex-col items-center justify-center text-center space-y-2 py-4">
-          <div className="w-14 h-14 rounded-full bg-gold-500/10 border border-gold-500/30 flex items-center justify-center text-gold-500">
-            <Sparkles className="w-7 h-7" />
+      <div className="space-y-5 p-4 pb-7 text-left text-text-primary">
+        <div className="flex flex-col items-center py-3 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <Sparkles className="h-7 w-7" />
           </div>
-          <h3 className="font-extrabold text-lg text-gold-400">Saint Enrolled Successfully</h3>
-          <p className="text-xs text-text-muted max-w-sm">
-            Account created in PocketBase Auth collection. Inform the member manually of their credentials.
+          <h3 className="mt-3 text-lg font-extrabold">Member enrolled</h3>
+          <p className="mt-1 max-w-sm text-xs leading-relaxed text-text-muted">
+            The registry profile is safely stored in PocketBase and is now available to authorized church users.
           </p>
         </div>
 
-        <GlassCard className="p-4 space-y-3 border border-gold-500/20 bg-gold-500/[0.02]">
-          <div className="flex justify-between items-center border-b border-white/5 pb-2">
-            <span className="text-[10px] font-bold text-gold-400 uppercase tracking-wider">Credentials Slip</span>
-            <button
-              onClick={handleCopyCredentials}
-              className="p-1 px-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gold-400 flex items-center gap-1.5 text-[10px] font-bold cursor-pointer transition-colors"
-            >
-              <Copy className="w-3 h-3" /> Copy
+        <GlassCard className="space-y-3 border border-gold-500/20 p-4">
+          <div className="flex items-center justify-between border-b border-border-subtle pb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gold-600 dark:text-gold-400">Registration details</span>
+            <button type="button" onClick={copyRegistryDetails} className="flex items-center gap-1.5 rounded-lg bg-surface-200 px-2.5 py-1.5 text-[10px] font-bold text-text-secondary">
+              <Copy className="h-3 w-3" /> Copy
             </button>
           </div>
-
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between">
-              <span className="text-text-muted font-medium">Full Name</span>
-              <span className="text-text-primary font-bold">{enrolledResult.fullName}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-muted font-medium">Member ID / Pass</span>
-              <span className="text-gold-400 font-mono font-bold">{enrolledResult.qrCode}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-muted font-medium">Auth Email</span>
-              <span className="text-text-primary font-medium">{enrolledResult.email}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-text-muted font-medium">Temporary Password</span>
-              <span className="bg-black/40 px-2 py-0.5 rounded text-white font-mono font-bold border border-white/5">{enrolledResult.passwordSimulated}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-text-muted font-medium">Assigned Role</span>
-              <span className="text-text-primary uppercase font-bold">{enrolledResult.role}</span>
-            </div>
-          </div>
+          <dl className="space-y-2 text-xs">
+            <div className="flex justify-between gap-4"><dt className="text-text-muted">Full name</dt><dd className="text-right font-bold">{enrolledResult.fullName}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-text-muted">Member ID</dt><dd className="font-mono font-bold text-gold-600 dark:text-gold-400">{enrolledResult.qrCode}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-text-muted">Email</dt><dd className="truncate font-medium">{enrolledResult.email}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-text-muted">Role</dt><dd className="font-bold capitalize">{enrolledResult.role.replaceAll('_', ' ')}</dd></div>
+          </dl>
         </GlassCard>
 
-        <div className="bg-white/[0.02] border border-white/5 p-3.5 rounded-xl text-xs space-y-1 text-text-secondary">
-          <p className="font-bold text-text-primary flex items-center gap-1.5">
-            <ShieldAlert className="w-4 h-4 text-amber-500" /> Administrative Policy
-          </p>
-          <p className="leading-relaxed text-[11px]">
-            Password generated locally. PocketBase push services are muted; you must transmit these credentials securely (WhatsApp, SMS, or Print) to the member.
-          </p>
+        <div className="flex gap-3 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3.5 text-xs text-text-secondary">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+          <p className="leading-relaxed">This enrollment does not create a login or password. A login account can be linked separately when the member needs app access.</p>
         </div>
 
-        <button
-          onClick={onClose}
-          className="w-full py-3 rounded-pill bg-gold-500 hover:bg-gold-600 text-black font-extrabold text-xs uppercase tracking-wider transition-colors shadow-glow-gold cursor-pointer text-center block"
-        >
-          Return to Registry
+        <button type="button" onClick={onClose} className="w-full rounded-pill bg-gold-500 py-3 text-center text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold">
+          Return to registry
         </button>
       </div>
     );
   }
 
-  const isPastor = currentUserRole?.id === 'lead_pastor';
-
   return (
-    <form onSubmit={handleEnroll} className="space-y-4 text-left p-4 pb-8 max-h-[80vh] overflow-y-auto">
-      <p className="text-xs text-text-secondary font-medium leading-relaxed">
-        Enroll a new saint into the central registry. This generates a secure fellowship pass ID and spins up an authenticated account.
+    <form onSubmit={handleEnroll} className="max-h-[80vh] space-y-4 overflow-y-auto p-4 pb-8 text-left">
+      <p className="text-xs font-medium leading-relaxed text-text-secondary">
+        Add a member to the central church registry. Required fields are marked below.
       </p>
 
-      {/* REQUIRED FIELD: Full Name */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1">
-          Full Name <span className="text-gold-500">*</span>
-        </label>
-        <div className="relative">
-          <input
-            type="text"
-            required
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="e.g. Brother Barnabas"
-            className="w-full p-3 pl-10 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none font-bold"
-          />
-          <User className="absolute left-3 top-3.5 w-4.5 h-4.5 text-text-muted" />
-        </div>
-      </div>
+      <Field label="Full name" required icon={<User className="h-4 w-4" />}>
+        <input required value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="e.g. Grace Wanjiku" className="registry-input" />
+      </Field>
+      <Field label="Phone number" required icon={<Phone className="h-4 w-4" />}>
+        <input type="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="e.g. +254 700 000 000" className="registry-input" />
+      </Field>
+      <Field label="Email address" required icon={<Mail className="h-4 w-4" />}>
+        <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="member@example.com" className="registry-input" />
+      </Field>
 
-      {/* REQUIRED FIELD: Phone */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1">
-          Phone Number <span className="text-gold-500">*</span>
-        </label>
-        <div className="relative">
-          <input
-            type="tel"
-            required
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+1 (555) 019-3281"
-            className="w-full p-3 pl-10 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none font-bold"
-          />
-          <Phone className="absolute left-3 top-3.5 w-4.5 h-4.5 text-text-muted" />
-        </div>
-      </div>
-
-      {/* REQUIRED FIELD: Email */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1">
-          Email Address <span className="text-gold-500">*</span>
-        </label>
-        <div className="relative">
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="barnabas@grace.com"
-            className="w-full p-3 pl-10 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none"
-          />
-          <Mail className="absolute left-3 top-3.5 w-4.5 h-4.5 text-text-muted" />
-        </div>
-      </div>
-
-      {/* REQUIRED FIELD: Role */}
-      <div className="space-y-1">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-          Registry Role <span className="text-gold-500">*</span>
-        </label>
-        <div className="grid grid-cols-3 gap-2">
-          {['member', 'worker', 'admin'].map((r) => {
-            const isSelected = role === r;
-            const isDisabled = r === 'admin' && !isPastor;
-
+      <div className="space-y-2">
+        <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Registry role <span className="text-gold-500">*</span></label>
+        <div className="grid grid-cols-2 gap-2">
+          {ROLE_OPTIONS.map((option) => {
+            const disabled = option.id === 'administrator' && !isLeadPastor;
             return (
-              <button
-                key={r}
-                type="button"
-                disabled={isDisabled}
-                onClick={() => setRole(r as any)}
-                className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer relative ${
-                  isDisabled ? 'opacity-40 cursor-not-allowed border-white/5 bg-transparent text-text-muted' :
-                  isSelected 
-                    ? 'bg-gold-500 text-black border-gold-500 font-bold shadow-glow-gold' 
-                    : 'bg-white/[0.01] border-white/5 hover:bg-white/5 text-text-secondary font-semibold'
-                }`}
-              >
-                <span className="text-xs uppercase tracking-wider">{r}</span>
-                {isDisabled && (
-                  <span className="absolute -top-1.5 -right-1 text-[8px] bg-red-600 text-white rounded p-0.5 font-bold scale-75">
-                    Pastor Only
-                  </span>
-                )}
+              <button key={option.id} type="button" disabled={disabled} onClick={() => setRole(option.id)} className={`rounded-xl border p-2.5 text-xs font-bold transition-colors ${disabled ? 'cursor-not-allowed border-border-subtle text-text-muted opacity-45' : role === option.id ? 'border-gold-500 bg-gold-500 text-black' : 'border-border-subtle bg-surface-100 text-text-secondary'}`}>
+                {option.label}
               </button>
             );
           })}
         </div>
+        {!isLeadPastor && <p className="text-[10px] text-text-muted">Administrator assignment is restricted to the Lead Pastor.</p>}
       </div>
 
-      {/* WORKER SPECIFIC: Department Selection */}
-      {role === 'worker' && (
-        <div className="space-y-2 pt-1">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-gold-400">
-            Select Departments <span className="text-gold-500">*</span>
-          </label>
-          <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto p-2 border border-white/5 bg-white/[0.01] rounded-xl">
-            {DEPARTMENTS_LIST.map((dept) => {
-              const isChecked = selectedDepartments.includes(dept);
+      {departments.length > 0 && (
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Departments</label>
+          <div className="grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto rounded-xl border border-border-subtle bg-surface-100 p-2">
+            {departments.map((department) => {
+              const selected = selectedDepartments.includes(department.id);
               return (
-                <button
-                  key={dept}
-                  type="button"
-                  onClick={() => handleToggleDepartment(dept)}
-                  className={`flex items-center gap-2 p-2 rounded-lg text-left text-xs font-semibold cursor-pointer transition-colors ${
-                    isChecked 
-                      ? 'bg-gold-500/15 text-gold-400 border border-gold-500/30' 
-                      : 'bg-transparent border border-white/5 hover:bg-white/5 text-text-secondary'
-                  }`}
-                >
-                  <div className={`w-3.5 h-3.5 rounded flex items-center justify-center border ${
-                    isChecked ? 'border-gold-500 bg-gold-500 text-black' : 'border-white/20'
-                  }`}>
-                    {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                  </div>
-                  <span className="truncate">{dept}</span>
+                <button key={department.id} type="button" onClick={() => toggleDepartment(department.id)} className={`flex items-center gap-2 rounded-lg border p-2 text-left text-xs font-semibold ${selected ? 'border-gold-500/30 bg-gold-500/15 text-gold-700 dark:text-gold-400' : 'border-border-subtle text-text-secondary'}`}>
+                  <span className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${selected ? 'border-gold-500 bg-gold-500 text-black' : 'border-border-strong'}`}>{selected && <Check className="h-2.5 w-2.5 stroke-[3]" />}</span>
+                  <span className="truncate">{department.name}</span>
                 </button>
               );
             })}
@@ -327,86 +205,39 @@ Role: ${enrolledResult.role.toUpperCase()}`;
         </div>
       )}
 
-      {/* OPTIONAL FIELDS SECTIONS */}
-      <div className="border-t border-white/5 pt-3 mt-4 space-y-3">
-        <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
-          Church Metadata & Personal (Optional)
-        </h4>
-
-        {/* Cell Group Dropdown */}
+      <div className="space-y-3 border-t border-border-subtle pt-3">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Church and personal details (optional)</h4>
         <div className="space-y-1">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-            Assign Cell Group
-          </label>
-          <select
-            value={cellGroupId}
-            onChange={(e) => setCellGroupId(e.target.value)}
-            className="w-full p-3 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none font-bold"
-          >
-            <option value="">-- Not Assigned --</option>
-            {cellGroups.map((cg) => (
-              <option key={cg.localId} value={cg.localId}>
-                {cg.name}
-              </option>
-            ))}
+          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Cell group</label>
+          <select value={cellGroupId} onChange={(event) => setCellGroupId(event.target.value)} disabled={referencesLoading} className="w-full rounded-card border border-border-subtle bg-surface-100 p-3 text-sm font-bold text-text-primary outline-none focus:border-gold-500 focus:ring-2 focus:ring-gold-500/30">
+            <option value="">{referencesLoading ? 'Loading cell groups…' : 'Not assigned'}</option>
+            {cellGroups.map((cell) => <option key={cell.id} value={cell.id}>{cell.name}</option>)}
           </select>
         </div>
-
-        {/* Section/District Auto-Fill */}
-        {sectionName && (
-          <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
-            <div className="flex flex-col text-xs">
-              <span className="text-[10px] font-semibold text-text-muted uppercase">District / Section (Auto-Fills)</span>
-              <span className="text-gold-400 font-bold mt-0.5">{sectionName}</span>
-            </div>
-            <AccentBadge label="Auto" variant="sage" size="sm" />
-          </div>
-        )}
-
-        {/* Date of Birth Picker */}
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1">
-            Date of Birth
-          </label>
-          <div className="relative">
-            <input
-              type="date"
-              value={dateOfBirth}
-              onChange={(e) => setDateOfBirth(e.target.value)}
-              className="w-full p-3 pl-10 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none"
-            />
-            <Calendar className="absolute left-3 top-3.5 w-4.5 h-4.5 text-text-muted" />
-          </div>
-        </div>
-
-        {/* Address Input */}
-        <div className="space-y-1">
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
-            Residential Address
-          </label>
-          <div className="relative">
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="e.g. 14 Grace Avenue, District North"
-              className="w-full p-3 pl-10 rounded-card bg-surface-200 dark:bg-surface-200 light:bg-surface-light-secondary text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none"
-            />
-            <MapPin className="absolute left-3 top-3.5 w-4.5 h-4.5 text-text-muted" />
-          </div>
-        </div>
+        {sectionName && <div className="flex items-center justify-between rounded-xl border border-border-subtle bg-surface-100 p-3 text-xs"><span><span className="block text-[10px] uppercase text-text-muted">Section</span><strong className="mt-0.5 block text-gold-700 dark:text-gold-400">{sectionName}</strong></span><AccentBadge label="Auto" variant="sage" size="sm" /></div>}
+        <Field label="Date of birth" icon={<Calendar className="h-4 w-4" />}>
+          <input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} className="registry-input" />
+        </Field>
+        <Field label="Residential address" icon={<MapPin className="h-4 w-4" />}>
+          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Town, estate, or landmark" className="registry-input" />
+        </Field>
       </div>
 
-      {/* SUBMIT BUTTON */}
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className={`w-full mt-4 py-3.5 rounded-pill bg-gold-500 text-black font-extrabold text-xs uppercase tracking-wider transition-colors shadow-glow-gold cursor-pointer text-center flex items-center justify-center gap-2 ${
-          isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gold-600'
-        }`}
-      >
-        {isSubmitting ? 'Enrolling Saint...' : 'Enroll Member'}
+      <button type="submit" disabled={isSubmitting} className="flex w-full items-center justify-center gap-2 rounded-pill bg-gold-500 py-3.5 text-xs font-extrabold uppercase tracking-wider text-black shadow-glow-gold disabled:cursor-not-allowed disabled:opacity-50">
+        {isSubmitting ? 'Enrolling member…' : 'Enroll member'}
       </button>
     </form>
+  );
+}
+
+function Field({ label, required, icon, children }: { label: string; required?: boolean; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">{label} {required && <span className="text-gold-500">*</span>}</label>
+      <div className="relative [&_.registry-input]:w-full [&_.registry-input]:rounded-card [&_.registry-input]:border [&_.registry-input]:border-border-subtle [&_.registry-input]:bg-surface-100 [&_.registry-input]:p-3 [&_.registry-input]:pl-10 [&_.registry-input]:text-sm [&_.registry-input]:text-text-primary [&_.registry-input]:outline-none [&_.registry-input]:focus:border-gold-500 [&_.registry-input]:focus:ring-2 [&_.registry-input]:focus:ring-gold-500/30">
+        <span className="pointer-events-none absolute left-3 top-3.5 text-text-muted">{icon}</span>
+        {children}
+      </div>
+    </div>
   );
 }

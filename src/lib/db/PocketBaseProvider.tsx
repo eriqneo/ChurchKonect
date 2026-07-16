@@ -136,6 +136,7 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
       }
       pb.authStore.clear();
       await clearLegacyIdentity();
+      await db.members.filter((member) => Boolean(member.remoteId)).delete();
       setUser(null);
     } finally {
       setIsLoading(false);

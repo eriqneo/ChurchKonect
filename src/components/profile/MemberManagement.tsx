@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../../lib/db/churchConnectDB';
-import { usePocketBaseMembers, PocketBaseMember } from '../../lib/db/pocketbaseHooks';
-import { useCurrentUser } from '../../lib/db/hooks';
+import { useMemberReferences, usePocketBaseMembers, type PocketBaseMember } from '../../lib/db/pocketbaseHooks';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useToast } from '../shared/toast/useToast';
 import { EnrollMemberForm } from './EnrollMemberForm';
 import { 
@@ -39,25 +37,11 @@ import {
   Compass
 } from 'lucide-react';
 
-const DEPARTMENTS_LIST = [
-  'Intercessory',
-  'ICT',
-  'Protocol',
-  'Media',
-  'Ushering',
-  'Choir',
-  'Worship Leader',
-  'Youth Crew',
-  'Children Ministry'
-];
-
 export function MemberManagement() {
   const { members, updateMember, deleteMember, resetPassword } = usePocketBaseMembers();
-  const { role: currentUserRole } = useCurrentUser();
+  const { departments, cellGroups } = useMemberReferences();
+  const { user } = useAuth();
   const toast = useToast();
-
-  const cellGroups = useLiveQuery(() => db.cellGroups.toArray()) || [];
-  const sections = useLiveQuery(() => db.sections.toArray()) || [];
 
   // Search & Filtering States
   const [searchQuery, setSearchQuery] = useState('');
@@ -77,7 +61,7 @@ export function MemberManagement() {
   // Sub-actions in Member Detail Sheet
   const [showEditSheet, setShowEditSheet] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
-  const [passwordResetResult, setPasswordResetResult] = useState<any | null>(null);
+  const [passwordResetResult, setPasswordResetResult] = useState<{ email: string; fullName: string; delivery: 'email' } | null>(null);
 
   // Edit fields temp states
   const [editName, setEditName] = useState('');
@@ -174,9 +158,9 @@ export function MemberManagement() {
     } else if (sortOption === 'Newest') {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     } else if (sortOption === 'Role') {
-      const roleOrder = { lead_pastor: 0, admin: 1, worker: 2, member: 3 };
-      const roleA = (roleOrder as any)[a.role.toLowerCase()] ?? 9;
-      const roleB = (roleOrder as any)[b.role.toLowerCase()] ?? 9;
+      const roleOrder: Record<string, number> = { lead_pastor: 0, administrator: 1, district_pastor: 2, department_head: 3, cell_leader: 4, member: 5, guest: 6 };
+      const roleA = roleOrder[a.role.toLowerCase()] ?? 9;
+      const roleB = roleOrder[b.role.toLowerCase()] ?? 9;
       return roleA - roleB;
     }
     return 0;
@@ -203,7 +187,7 @@ export function MemberManagement() {
 
     // If cell changed, look up section
     if (editCellGroupId) {
-      const selectedCell = cellGroups.find(c => c.localId === editCellGroupId);
+      const selectedCell = cellGroups.find(c => c.id === editCellGroupId);
       if (selectedCell) {
         updates.sectionId = selectedCell.sectionId;
       }
@@ -212,30 +196,39 @@ export function MemberManagement() {
       updates.sectionId = undefined;
     }
 
-    const updated = await updateMember(selectedMember.localId, updates);
-    if (updated) {
+    try {
+      const updated = await updateMember(selectedMember.remoteId, updates);
       toast.success('Member updated successfully!');
-      setSelectedMember(updated as PocketBaseMember);
+      setSelectedMember(updated);
       setShowEditSheet(false);
+    } catch (error) {
+      console.error('[Members] Update failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Member update failed.');
     }
   };
 
   const handleDeactivate = async () => {
     if (!selectedMember) return;
-    const success = await deleteMember(selectedMember.localId);
-    if (success) {
+    try {
+      await deleteMember(selectedMember.remoteId);
       toast.success(`${selectedMember.fullName} deactivated.`);
       setShowDeactivateConfirm(false);
       setSelectedMember(null);
+    } catch (error) {
+      console.error('[Members] Deactivation failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Member deactivation failed.');
     }
   };
 
   const handleResetPasswordAction = async () => {
     if (!selectedMember) return;
-    const result = await resetPassword(selectedMember.localId);
-    if (result) {
+    try {
+      const result = await resetPassword(selectedMember.remoteId);
       setPasswordResetResult(result);
-      toast.success('Temporary credentials generated!');
+      toast.success(`Password reset instructions were sent to ${result.email}.`);
+    } catch (error) {
+      console.error('[Members] Password reset failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Password reset could not be requested.');
     }
   };
 
@@ -249,12 +242,13 @@ export function MemberManagement() {
 
   const getRoleBadgeVariant = (role: string) => {
     const r = role.toLowerCase();
-    if (r === 'admin' || r === 'administrator' || r === 'lead_pastor') return 'gold';
-    if (r === 'worker' || r === 'cell_leader' || r === 'department_head') return 'sage';
+    if (r === 'administrator' || r === 'lead_pastor') return 'gold';
+    if (r === 'cell_leader' || r === 'department_head' || r === 'district_pastor') return 'sage';
     return 'muted';
   };
 
-  const isPastor = currentUserRole?.id === 'lead_pastor';
+  const isPastor = user?.role === 'lead_pastor';
+  const canManage = isPastor || user?.role === 'administrator';
 
   return (
     <div className="space-y-4 pb-12">
@@ -262,10 +256,10 @@ export function MemberManagement() {
       <SectionTitle
         title="Member Registry"
         badge={{ label: 'CMS', variant: 'gold' }}
-        action={{
+        action={canManage ? {
           label: 'Enroll New',
           onPress: () => setIsEnrollOpen(true)
-        }}
+        } : undefined}
       />
 
       {/* SEARCH AND FILTER BUTTON */}
@@ -298,7 +292,7 @@ export function MemberManagement() {
           </div>
         ) : (
           sortedMembers.map((member) => {
-            const assignedCell = cellGroups.find(c => c.localId === member.cellGroupId);
+            const assignedCell = cellGroups.find(c => c.id === member.cellGroupId);
             const departments = member.departments || [];
 
             const cellTag = assignedCell ? `🏡 ${assignedCell.name}` : '';
@@ -368,8 +362,9 @@ export function MemberManagement() {
             <div className="grid grid-cols-2 gap-2">
               {[
                 { id: 'member', label: 'Regular Member' },
-                { id: 'worker', label: 'Ministry Worker' },
-                { id: 'admin', label: 'Administrator' },
+                { id: 'cell_leader', label: 'Cell Leader' },
+                { id: 'department_head', label: 'Department Head' },
+                { id: 'administrator', label: 'Administrator' },
                 { id: 'lead_pastor', label: 'Lead Pastor' }
               ].map((r) => {
                 const isSelected = filterRoles.includes(r.id);
@@ -401,7 +396,7 @@ export function MemberManagement() {
             >
               <option value="">-- All Cell Groups --</option>
               {cellGroups.map((cg) => (
-                <option key={cg.localId} value={cg.localId}>
+                <option key={cg.id} value={cg.id}>
                   {cg.name}
                 </option>
               ))}
@@ -412,19 +407,19 @@ export function MemberManagement() {
           <div className="space-y-1.5">
             <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Filter by Department</span>
             <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto p-2 border border-white/5 bg-white/[0.01] rounded-xl">
-              {DEPARTMENTS_LIST.map((dept) => {
-                const isSelected = filterDepartments.includes(dept);
+              {departments.map((department) => {
+                const isSelected = filterDepartments.includes(department.name);
                 return (
                   <button
-                    key={dept}
-                    onClick={() => handleToggleDeptFilter(dept)}
+                    key={department.id}
+                    onClick={() => handleToggleDeptFilter(department.name)}
                     className={`flex items-center justify-between p-2 rounded-lg text-left text-xs font-semibold cursor-pointer transition-colors ${
                       isSelected 
                         ? 'bg-gold-500/10 text-gold-500 border border-gold-500/20' 
                         : 'bg-transparent border border-white/5 hover:bg-white/5 text-text-secondary'
                     }`}
                   >
-                    <span className="truncate">{dept}</span>
+                    <span className="truncate">{department.name}</span>
                     {isSelected ? <Check className="w-3.5 h-3.5 text-gold-500" /> : null}
                   </button>
                 );
@@ -474,7 +469,7 @@ export function MemberManagement() {
       <BottomSheet
         isOpen={isEnrollOpen}
         onClose={() => setIsEnrollOpen(false)}
-        title="Enroll Member to Course"
+        title="Enroll New Member"
       >
         <EnrollMemberForm 
           onClose={() => setIsEnrollOpen(false)} 
@@ -517,7 +512,7 @@ export function MemberManagement() {
               <GlassCard className="p-4 space-y-2 border border-emerald-500/30 bg-emerald-500/[0.02]">
                 <div className="flex justify-between items-center pb-1">
                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5" /> Temporary Credentials Generated
+                    <Check className="w-3.5 h-3.5" /> Reset Email Sent
                   </span>
                   <button 
                     onClick={() => setPasswordResetResult(null)}
@@ -531,15 +526,12 @@ export function MemberManagement() {
                     <span className="text-text-secondary">Member Name</span>
                     <span className="font-bold">{passwordResetResult.fullName}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">Temporary Password</span>
-                    <span className="font-mono bg-black/40 px-2 py-0.5 rounded text-white font-bold border border-white/5">
-                      {passwordResetResult.temporaryPassword}
-                    </span>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-text-secondary">Delivered to</span>
+                    <span className="truncate font-medium text-emerald-600 dark:text-emerald-400">{passwordResetResult.email}</span>
                   </div>
-                  <div className="flex justify-col gap-1 text-[10px] text-text-muted pt-1 border-t border-white/5">
-                    <span>Instruct them to use password on next sign-in or use standard link:</span>
-                    <span className="font-mono text-emerald-400 select-all truncate">{passwordResetResult.resetLink}</span>
+                  <div className="border-t border-white/5 pt-2 text-[10px] leading-relaxed text-text-muted">
+                    PocketBase sent a one-time reset link. No password is displayed or stored by ChurchConnect.
                   </div>
                 </div>
               </GlassCard>
@@ -572,8 +564,8 @@ export function MemberManagement() {
                 >
                   <KeyRound className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
                   <div className="flex flex-col text-left">
-                    <span>Reset Pass</span>
-                    <span className="text-[9px] text-text-muted font-normal mt-0.5">Generate temp keys</span>
+                    <span>Reset password</span>
+                    <span className="text-[9px] text-text-muted font-normal mt-0.5">Send secure email link</span>
                   </div>
                 </button>
 
@@ -626,7 +618,7 @@ export function MemberManagement() {
                     <Grid className="w-4 h-4 text-text-muted" /> Cell Group
                   </span>
                   <span className="text-text-primary font-bold">
-                    {cellGroups.find(c => c.localId === selectedMember.cellGroupId)?.name || 'Not assigned'}
+                    {selectedMember.cellGroupName || 'Not assigned'}
                   </span>
                 </div>
                 {selectedMember.departments && selectedMember.departments.length > 0 && (
@@ -699,17 +691,22 @@ export function MemberManagement() {
           {/* Change Role - Restricted */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Change Role</label>
-            <div className="grid grid-cols-3 gap-2">
-              {['member', 'worker', 'admin'].map((r) => {
-                const isSelected = editRole === r;
-                const isDisabled = r === 'admin' && !isPastor;
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'member', label: 'Member' },
+                { id: 'cell_leader', label: 'Cell Leader' },
+                { id: 'department_head', label: 'Department Head' },
+                { id: 'administrator', label: 'Administrator' }
+              ].map((roleOption) => {
+                const isSelected = editRole === roleOption.id;
+                const isDisabled = roleOption.id === 'administrator' && !isPastor;
 
                 return (
                   <button
-                    key={r}
+                    key={roleOption.id}
                     type="button"
                     disabled={isDisabled}
-                    onClick={() => setEditRole(r)}
+                    onClick={() => setEditRole(roleOption.id)}
                     className={`p-2 rounded-xl border text-center transition-all cursor-pointer relative ${
                       isDisabled ? 'opacity-40 cursor-not-allowed border-white/5 bg-transparent text-text-muted' :
                       isSelected 
@@ -717,7 +714,7 @@ export function MemberManagement() {
                         : 'bg-white/[0.01] border-white/5 text-text-secondary font-semibold'
                     }`}
                   >
-                    <span className="text-xs uppercase tracking-wider">{r}</span>
+                    <span className="text-xs tracking-wide">{roleOption.label}</span>
                   </button>
                 );
               })}
@@ -734,25 +731,25 @@ export function MemberManagement() {
             >
               <option value="">-- Not Assigned --</option>
               {cellGroups.map((cg) => (
-                <option key={cg.localId} value={cg.localId}>
+                <option key={cg.id} value={cg.id}>
                   {cg.name}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Department Selection if Worker */}
-          {editRole === 'worker' && (
+          {/* Department Selection */}
+          {departments.length > 0 && (
             <div className="space-y-2 pt-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-gold-400">Assign Departments</span>
               <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto p-2 border border-white/5 bg-white/[0.01] rounded-xl">
-                {DEPARTMENTS_LIST.map((dept) => {
-                  const isChecked = editDepartments.includes(dept);
+                {departments.map((department) => {
+                  const isChecked = editDepartments.includes(department.name);
                   return (
                     <button
-                      key={dept}
+                      key={department.id}
                       type="button"
-                      onClick={() => handleToggleEditDept(dept)}
+                      onClick={() => handleToggleEditDept(department.name)}
                       className={`flex items-center gap-2 p-2 rounded-lg text-left text-xs font-semibold cursor-pointer transition-colors ${
                         isChecked 
                           ? 'bg-gold-500/15 text-gold-400 border border-gold-500/30' 
@@ -764,7 +761,7 @@ export function MemberManagement() {
                       }`}>
                         {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                       </div>
-                      <span className="truncate">{dept}</span>
+                      <span className="truncate">{department.name}</span>
                     </button>
                   );
                 })}

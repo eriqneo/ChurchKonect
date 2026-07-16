@@ -12,6 +12,9 @@ import {
   SwipeableRow
 } from '../shared';
 import { staggerChildren } from '../../lib/animations';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { type PocketBaseMember, usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
+import { EnrollMemberForm } from '../profile/EnrollMemberForm';
 import { 
   Users, 
   Check, 
@@ -47,23 +50,38 @@ export interface Member {
   email: string;
   phone: string;
   role: string;
-  roleId: 'lead_pastor' | 'admin' | 'cell_leader' | 'district_pastor' | 'department_head' | 'member' | 'guest';
+  roleId: 'lead_pastor' | 'administrator' | 'cell_leader' | 'district_pastor' | 'department_head' | 'member' | 'guest';
   department: string;
   joinedDate: string; // YYYY-MM-DD
 }
 
-const INITIAL_MEMBERS: Member[] = [
-  { id: 'm1', name: 'Pastor David', email: 'david@church.org', phone: '+1 (555) 019-2831', role: 'Lead Pastor', roleId: 'lead_pastor', department: 'Executive Clergy', joinedDate: '2015-08-15' },
-  { id: 'm2', name: 'Sarah Jenkins', email: 'sarah@church.org', phone: '+1 (555) 012-9988', role: 'Administrator', roleId: 'admin', department: 'Operations & Finance', joinedDate: '2018-02-10' },
-  { id: 'm3', name: 'Brother Michael', email: 'michael@hope.org', phone: '+1 (555) 014-4422', role: 'Cell Leader', roleId: 'cell_leader', department: 'Hope Cell Group', joinedDate: '2019-11-04' },
-  { id: 'm4', name: 'Pastor Abraham', email: 'abraham@north.org', phone: '+1 (555) 017-5500', role: 'District Pastor', roleId: 'district_pastor', department: 'North District', joinedDate: '2016-05-20' },
-  { id: 'm5', name: 'Sister Grace', email: 'grace@worship.org', phone: '+1 (555) 011-7711', role: 'Department Head', roleId: 'department_head', department: 'Worship Ministry', joinedDate: '2017-09-01' },
-  { id: 'm6', name: 'John Doe', email: 'john.doe@gmail.com', phone: '+1 (555) 013-3344', role: 'Regular Member', roleId: 'member', department: 'General Congregation', joinedDate: '2021-04-12' },
-  { id: 'm7', name: 'Sister Clara', email: 'clara.s@gmail.com', phone: '+1 (555) 016-8899', role: 'Regular Member', roleId: 'member', department: 'Worship Ministry', joinedDate: '2020-01-25' },
-  { id: 'm8', name: 'Brother Timothy', email: 'timothy.b@gmail.com', phone: '+1 (555) 015-2277', role: 'Regular Member', roleId: 'member', department: 'Hope Cell Group', joinedDate: '2022-07-15' },
-  { id: 'm9', name: 'Sister Martha', email: 'martha.m@gmail.com', phone: '+1 (555) 018-1122', role: 'Regular Member', roleId: 'member', department: 'Youth Ministry', joinedDate: '2023-03-10' },
-  { id: 'm10', name: 'visitor_492', email: 'visitor492@welcome.com', phone: '+1 (555) 010-0099', role: 'Guest / Seeker', roleId: 'guest', department: 'First-time Welcome', joinedDate: '2026-06-28' }
-];
+const MEMBER_ROLE_LABELS: Record<Member['roleId'], string> = {
+  lead_pastor: 'Lead Pastor',
+  administrator: 'Administrator',
+  cell_leader: 'Cell Leader',
+  district_pastor: 'District Pastor',
+  department_head: 'Department Head',
+  member: 'Member',
+  guest: 'Guest / Seeker'
+};
+
+function directoryRole(role: string): Member['roleId'] {
+  return role in MEMBER_ROLE_LABELS ? role as Member['roleId'] : 'member';
+}
+
+function toDirectoryMember(member: PocketBaseMember): Member {
+  const roleId = directoryRole(member.role);
+  return {
+    id: member.remoteId,
+    name: member.fullName,
+    email: member.email || 'No email provided',
+    phone: member.phone || 'No phone provided',
+    role: MEMBER_ROLE_LABELS[roleId],
+    roleId,
+    department: member.departments.join(', ') || member.cellGroupName || member.sectionName || 'General congregation',
+    joinedDate: member.createdAt?.slice(0, 10) || '—'
+  };
+}
 
 interface Cell {
   id: string;
@@ -115,6 +133,16 @@ const PILLAR_ICONS = {
 };
 
 export function SaintsDirectory() {
+  const { user } = useAuth();
+  const {
+    members: remoteMembers,
+    refreshMembers,
+    isLoading: membersLoading,
+    isRefreshing: membersRefreshing,
+    error: membersError
+  } = usePocketBaseMembers();
+  const members = remoteMembers.filter((member) => member.status === 'Active').map(toDirectoryMember);
+  const canManageMembers = user?.role === 'lead_pastor' || user?.role === 'administrator';
   // Navigation tabs list
   const TABS = [
     { id: 'members', label: 'Members', count: 10 },
@@ -130,8 +158,7 @@ export function SaintsDirectory() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [debouncedQuery, setDebouncedQuery] = useState<string>('');
   
-  // Storage states for full creation flows
-  const [members, setMembers] = useState<Member[]>(INITIAL_MEMBERS);
+  // Other structure modules remain local until their backend module is implemented.
   const [cells, setCells] = useState<Cell[]>(INITIAL_CELLS);
   const [districts, setDistricts] = useState<District[]>(INITIAL_DISTRICTS);
   const [pillars, setPillars] = useState<Pillar[]>(INITIAL_PILLARS);
@@ -153,14 +180,6 @@ export function SaintsDirectory() {
 
   // New item forms modal states
   const [showAddMember, setShowAddMember] = useState(false);
-  const [newMemberForm, setNewMemberForm] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    roleId: 'member' as Member['roleId'],
-    department: 'General Congregation'
-  });
-
   const [showAddCell, setShowAddCell] = useState(false);
   const [newCellForm, setNewCellForm] = useState({
     name: '',
@@ -173,7 +192,7 @@ export function SaintsDirectory() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [roleFilter, setRoleFilter] = useState<Record<string, boolean>>({
     lead_pastor: true,
-    admin: true,
+    administrator: true,
     cell_leader: true,
     district_pastor: true,
     department_head: true,
@@ -265,46 +284,6 @@ export function SaintsDirectory() {
     }
   };
 
-  // Save New Member
-  const handleCreateMember = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMemberForm.name || !newMemberForm.email) {
-      showToast('Please fill in required fields');
-      return;
-    }
-    const roleLabelMap: Record<Member['roleId'], string> = {
-      lead_pastor: 'Lead Pastor',
-      admin: 'Administrator',
-      cell_leader: 'Cell Leader',
-      district_pastor: 'District Pastor',
-      department_head: 'Department Head',
-      member: 'Regular Member',
-      guest: 'Guest / Seeker'
-    };
-
-    const added: Member = {
-      id: `m${Date.now()}`,
-      name: newMemberForm.name,
-      email: newMemberForm.email,
-      phone: newMemberForm.phone || '+1 (555) 012-3456',
-      roleId: newMemberForm.roleId,
-      role: roleLabelMap[newMemberForm.roleId],
-      department: newMemberForm.department,
-      joinedDate: new Date().toISOString().split('T')[0]
-    };
-
-    setMembers([added, ...members]);
-    setShowAddMember(false);
-    setNewMemberForm({
-      name: '',
-      email: '',
-      phone: '',
-      roleId: 'member',
-      department: 'General Congregation'
-    });
-    showToast(`Successfully enrolled ${added.name}!`);
-  };
-
   // Save New Cell
   const handleCreateCell = (e: React.FormEvent) => {
     e.preventDefault();
@@ -342,7 +321,7 @@ export function SaintsDirectory() {
     triggerHaptic();
     setRoleFilter({
       lead_pastor: true,
-      admin: true,
+      administrator: true,
       cell_leader: true,
       district_pastor: true,
       department_head: true,
@@ -381,10 +360,11 @@ export function SaintsDirectory() {
         return b.joinedDate.localeCompare(a.joinedDate);
       } else {
         // Sort by role hierarchy weight
-        const weight = { lead_pastor: 7, admin: 6, district_pastor: 5, department_head: 4, cell_leader: 3, member: 2, guest: 1 };
+        const weight: Record<Member['roleId'], number> = { lead_pastor: 7, administrator: 6, district_pastor: 5, department_head: 4, cell_leader: 3, member: 2, guest: 1 };
         return weight[b.roleId] - weight[a.roleId];
       }
     });
+  const departmentOptions = Array.from(new Set(members.map((member) => member.department))).sort();
 
   // 2. FILTER CELLS
   const filteredCells = cells.filter(c => {
@@ -408,7 +388,7 @@ export function SaintsDirectory() {
   const getRoleColorClass = (roleId: Member['roleId']) => {
     switch (roleId) {
       case 'lead_pastor':
-      case 'admin':
+      case 'administrator':
       case 'district_pastor':
         return 'ring-2 ring-gold-500';
       case 'cell_leader':
@@ -428,9 +408,9 @@ export function SaintsDirectory() {
       <SectionTitle
         title="Saints & Structures"
         badge={{
-          label: "Online",
-          variant: "sage",
-          icon: <span className="w-1.5 h-1.5 rounded-full bg-[#7BC47F] animate-pulse"></span>
+          label: membersError ? 'Cached' : membersRefreshing ? 'Syncing' : 'Synced',
+          variant: membersError ? 'gold' : 'sage',
+          icon: <span className={`h-1.5 w-1.5 rounded-full ${membersError ? 'bg-amber-500' : 'bg-[#7BC47F]'}`}></span>
         }}
       />
 
@@ -442,10 +422,7 @@ export function SaintsDirectory() {
           value={searchQuery}
           onChange={setSearchQuery}
           placeholder="Search members, cells, groups..."
-          onVoice={() => {
-            triggerHaptic();
-            setSearchQuery('Sister Grace');
-          }}
+          onVoice={() => showToast('Voice search is not available yet')}
           onFilter={() => {
             triggerHaptic();
             setIsFilterOpen(true);
@@ -529,23 +506,22 @@ export function SaintsDirectory() {
                   <span className={`${Typography.CAPTION} text-text-muted font-bold tracking-wide`}>
                     {filteredMembers.length} {filteredMembers.length === 1 ? 'member' : 'members'} found
                   </span>
-                  <button
-                    onClick={() => { triggerHaptic(); setShowAddMember(true); }}
-                    className="cursor-pointer"
-                  >
-                    <AccentBadge 
-                      label="Enroll" 
-                      variant="gold" 
-                      size="md" 
-                      icon={<Plus className="w-3 h-3 text-black fill-black stroke-[3px]" />}
-                    />
-                  </button>
+                  {canManageMembers && (
+                    <button onClick={() => { triggerHaptic(); setShowAddMember(true); }} className="cursor-pointer">
+                      <AccentBadge label="Enroll" variant="gold" size="md" icon={<Plus className="w-3 h-3 text-black fill-black stroke-[3px]" />} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Main list & Alphabetical column layout */}
                 <div className="relative pr-6">
                   {/* Empty state check */}
-                  {filteredMembers.length === 0 ? (
+                  {membersLoading ? (
+                    <div className="flex flex-col items-center justify-center space-y-3 py-12 text-center">
+                      <div className="h-10 w-10 animate-spin rounded-full border-2 border-gold-500/25 border-t-gold-500" />
+                      <p className={`${Typography.CAPTION} text-text-muted`}>Loading the confirmed member registry…</p>
+                    </div>
+                  ) : filteredMembers.length === 0 ? (
                     <div className="py-12 text-center flex flex-col items-center justify-center space-y-3">
                       <motion.div
                         animate={{ y: [0, -4, 0] }}
@@ -555,17 +531,16 @@ export function SaintsDirectory() {
                         <Users className="w-6 h-6" />
                       </motion.div>
                       <div>
-                        <h3 className={`${Typography.SUBTITLE} text-text-primary`}>No members found</h3>
+                        <h3 className={`${Typography.SUBTITLE} text-text-primary`}>{members.length === 0 ? 'No members enrolled yet' : 'No members found'}</h3>
                         <p className={`${Typography.CAPTION} text-text-muted mt-1 max-w-[220px]`}>
-                          Try expanding your search query or role filters.
+                          {membersError
+                            ? 'The server could not be reached and there is no confirmed cache on this device.'
+                            : members.length === 0
+                              ? canManageMembers ? 'Enroll the first member to begin the church registry.' : 'An administrator has not added any members yet.'
+                              : 'Try expanding your search query or role filters.'}
                         </p>
                       </div>
-                      <button
-                        onClick={resetFilters}
-                        className="px-4 py-1.5 border border-gold-500/30 text-gold-500 rounded-pill text-xs font-bold hover:bg-gold-500/10 transition-colors"
-                      >
-                        Reset Filters
-                      </button>
+                      {members.length > 0 && <button onClick={resetFilters} className="px-4 py-1.5 border border-gold-500/30 text-gold-500 rounded-pill text-xs font-bold hover:bg-gold-500/10 transition-colors">Reset Filters</button>}
                     </div>
                   ) : (
                     <motion.div
@@ -623,7 +598,7 @@ export function SaintsDirectory() {
                   )}
 
                   {/* Thin elegant alphabetical index bar on the right edge */}
-                  <div className="absolute right-0 top-0 bottom-0 w-5 flex flex-col justify-between py-2 text-[8px] font-bold text-text-muted bg-surface-100/50 rounded-pill">
+                  {filteredMembers.length > 0 && <div className="absolute right-0 top-0 bottom-0 w-5 flex flex-col justify-between py-2 text-[8px] font-bold text-text-muted bg-surface-100/50 rounded-pill">
                     {letters.filter((_, i) => i % 2 === 0).map((letter) => (
                       <button
                         key={letter}
@@ -633,7 +608,7 @@ export function SaintsDirectory() {
                         {letter}
                       </button>
                     ))}
-                  </div>
+                  </div>}
                 </div>
 
               </div>
@@ -860,7 +835,7 @@ export function SaintsDirectory() {
               {Object.keys(roleFilter).map((roleKey) => {
                 const labelMap: Record<string, string> = {
                   lead_pastor: 'Lead Pastor',
-                  admin: 'Administrator',
+                  administrator: 'Administrator',
                   cell_leader: 'Cell Leader',
                   district_pastor: 'District Pastor',
                   department_head: 'Dept. Head',
@@ -900,13 +875,7 @@ export function SaintsDirectory() {
               className="w-full bg-surface-100 dark:bg-surface-100 light:bg-surface-light-secondary border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
             >
               <option value="All">All Departments</option>
-              <option value="Executive Clergy">Executive Clergy</option>
-              <option value="Operations & Finance">Operations & Finance</option>
-              <option value="Hope Cell Group">Hope Cell Group</option>
-              <option value="North District">North District</option>
-              <option value="Worship Ministry">Worship Ministry</option>
-              <option value="General Congregation">General Congregation</option>
-              <option value="Youth Ministry">Youth Ministry</option>
+              {departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}
             </select>
           </div>
 
@@ -993,7 +962,7 @@ export function SaintsDirectory() {
                 <span>Message Member</span>
               </button>
 
-              <button
+              {canManageMembers && <button
                 onClick={() => {
                   triggerHaptic();
                   setLongPressedMember(null);
@@ -1003,7 +972,7 @@ export function SaintsDirectory() {
               >
                 <UserCheck className="w-4 h-4 text-gold-500" />
                 <span>Assign Role</span>
-              </button>
+              </button>}
 
               <button
                 onClick={() => {
@@ -1028,7 +997,7 @@ export function SaintsDirectory() {
       <BottomSheet
         isOpen={selectedMember !== null}
         onClose={() => setSelectedMember(null)}
-        title="Saints Profile Profile"
+        title="Member Profile"
       >
         {selectedMember && (
           <div className="space-y-5 pb-8 text-left">
@@ -1071,9 +1040,9 @@ export function SaintsDirectory() {
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-text-muted font-bold">Account Verification</span>
+                <span className="text-text-muted font-bold">Registry status</span>
                 <span className="text-semantic-success font-bold flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" /> SECURE
+                  <ShieldCheck className="w-3.5 h-3.5" /> CONFIRMED
                 </span>
               </div>
             </div>
@@ -1083,7 +1052,9 @@ export function SaintsDirectory() {
                 onClick={() => {
                   triggerHaptic();
                   setSelectedMember(null);
-                  showToast(`Email invitation logged to ${selectedMember.email}`);
+                  window.location.href = selectedMember.phone !== 'No phone provided'
+                    ? `sms:${selectedMember.phone}`
+                    : `mailto:${selectedMember.email}`;
                 }}
                 className="flex-1 py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill text-center hover:bg-gold-400 transition-all cursor-pointer"
               >
@@ -1234,89 +1205,10 @@ export function SaintsDirectory() {
         onClose={() => setShowAddMember(false)}
         title="Enroll New Saint"
       >
-        <form onSubmit={handleCreateMember} className="space-y-4 pb-8 text-left">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Full Name *</label>
-            <input
-              type="text"
-              required
-              value={newMemberForm.name}
-              onChange={(e) => setNewMemberForm({ ...newMemberForm, name: e.target.value })}
-              placeholder="e.g. Timothy Clark"
-              className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Email Address *</label>
-            <input
-              type="email"
-              required
-              value={newMemberForm.email}
-              onChange={(e) => setNewMemberForm({ ...newMemberForm, email: e.target.value })}
-              placeholder="e.g. timothy@fellowship.com"
-              className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Phone Number</label>
-            <input
-              type="text"
-              value={newMemberForm.phone}
-              onChange={(e) => setNewMemberForm({ ...newMemberForm, phone: e.target.value })}
-              placeholder="e.g. +1 (555) 019-3388"
-              className="w-full bg-surface-100 border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3.5">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Initial Role</label>
-              <select
-                value={newMemberForm.roleId}
-                onChange={(e) => setNewMemberForm({ ...newMemberForm, roleId: e.target.value as any })}
-                className="w-full bg-surface-100 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-              >
-                <option value="member">Regular Member</option>
-                <option value="cell_leader">Cell Leader</option>
-                <option value="department_head">Department Head</option>
-                <option value="guest">Guest / Seeker</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Department</label>
-              <select
-                value={newMemberForm.department}
-                onChange={(e) => setNewMemberForm({ ...newMemberForm, department: e.target.value })}
-                className="w-full bg-surface-100 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
-              >
-                <option value="General Congregation">General Congregation</option>
-                <option value="Worship Ministry">Worship Ministry</option>
-                <option value="Hope Cell Group">Hope Cell Group</option>
-                <option value="Youth Ministry">Youth Ministry</option>
-                <option value="First-time Welcome">First-time Welcome</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-4 flex gap-3">
-            <button
-              type="submit"
-              className="flex-1 py-3 bg-gold-500 text-black font-extrabold text-xs rounded-pill text-center cursor-pointer shadow-lg hover:bg-gold-400"
-            >
-              Enroll Saint
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowAddMember(false)}
-              className="flex-1 py-3 bg-surface-100 text-text-primary font-bold text-xs rounded-pill text-center"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+        <EnrollMemberForm
+          onClose={() => setShowAddMember(false)}
+          onSuccess={() => { void refreshMembers(); }}
+        />
       </BottomSheet>
 
       {/* Form B: Create Cell */}

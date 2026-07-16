@@ -266,7 +266,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   };
 
   const isWorkerRole = ['cell_leader', 'department_head', 'worker'].includes(currentRole?.id?.toLowerCase());
-  const isAdminOrPastor = currentRole?.isAdmin || currentRole?.id === 'lead_pastor';
+  const isAdminOrPastor = currentRole?.id === 'administrator' || currentRole?.id === 'lead_pastor';
 
   return (
     <div className="space-y-6 pb-24 text-text-primary">
