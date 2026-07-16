@@ -283,7 +283,7 @@ export function MobileLayout() {
           }}
           className={`flex items-center gap-1.5 px-3 py-1 border rounded-full text-xs font-semibold transition-all cursor-pointer ${
             isOnline 
-              ? 'bg-[#7BC47F]/10 text-[#7BC47F] border-[#7BC47F]/20 hover:bg-[#7BC47F]/20'
+              ? 'bg-semantic-success/10 text-semantic-success border-semantic-success/20 hover:bg-semantic-success/15'
               : 'bg-cathedral-500/10 text-cathedral-400 border-cathedral-500/20 hover:bg-cathedral-500/20'
           }`}
         >
@@ -1013,7 +1013,7 @@ export function MobileLayout() {
                   className={`w-full py-2.5 rounded-pill border text-xs font-bold text-center cursor-pointer transition-colors ${
                     isOnline 
                       ? 'bg-cathedral-500/10 text-cathedral-400 border-cathedral-500/25 hover:bg-cathedral-500/20' 
-                      : 'bg-[#7BC47F]/15 text-[#7BC47F] border-[#7BC47F]/25'
+                      : 'bg-semantic-success/10 text-semantic-success border-semantic-success/25'
                   }`}
                 >
                   {isOnline ? 'Go Offline' : 'Go Online (Auto-Sync)'}
@@ -1198,7 +1198,7 @@ export function MobileLayout() {
                       onClick={() => toggleAttendance(member.id)}
                       className={`px-3 py-1.5 rounded-pill text-xs font-bold border transition-colors cursor-pointer ${
                         member.present
-                          ? 'bg-[#7BC47F]/10 text-[#7BC47F] border-[#7BC47F]/45'
+                          ? 'bg-semantic-success/10 text-semantic-success border-semantic-success/45'
                           : 'bg-transparent text-theme-text-muted border-theme-border'
                       }`}
                     >

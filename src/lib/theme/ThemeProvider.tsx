@@ -71,7 +71,7 @@ function setThemeToIndexedDB(value: string): Promise<void> {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark'); // Default to dark as primary mode
+  const [theme, setTheme] = useState<Theme>('light');
 
   // Load theme on mount
   useEffect(() => {
@@ -81,15 +81,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         if (persistedValue === 'dark' || persistedValue === 'light') {
           applyTheme(persistedValue as Theme);
         } else {
-          // Fallback to system preference
-          const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          const initialTheme = systemPrefersDark ? 'dark' : 'light';
-          applyTheme(initialTheme);
+          // ChurchConnect intentionally starts in its highest-readability mode.
+          applyTheme('light');
         }
       } catch (error) {
         console.error('Failed to load theme from IndexedDB:', error);
-        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        applyTheme(systemPrefersDark ? 'dark' : 'light');
+        applyTheme('light');
       }
     }
 
@@ -101,6 +98,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const root = document.documentElement;
     root.classList.remove('dark', 'light');
     root.classList.add(newTheme);
+    root.style.colorScheme = newTheme;
   };
 
   const toggleTheme = async () => {

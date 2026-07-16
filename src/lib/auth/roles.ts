@@ -36,6 +36,9 @@ export const APP_ROLES: AppRole[] = [
   { id: 'guest', label: 'Guest / Seeker', name: 'Guest', avatarText: 'GS', department: 'First-time Welcome', isAdmin: false }
 ];
 
+export const isRoleSimulatorEnabled =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_ROLE_SIMULATOR === 'true';
+
 export function normalizeRoleId(role: string | undefined): AppRoleId {
   const normalized = role === 'admin' ? 'administrator' : role;
   return APP_ROLE_IDS.includes(normalized as AppRoleId)

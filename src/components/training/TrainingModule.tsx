@@ -22,6 +22,7 @@ import {
   ProgressRing
 } from '../shared';
 import { useToast } from '../shared/toast/useToast';
+import { isRoleSimulatorEnabled } from '../../lib/auth/roles';
 import { 
   Check, 
   Plus, 
@@ -1039,7 +1040,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       {/* --------------------------------------
           TOP SWITCHER / ROLE EMULATOR
          -------------------------------------- */}
-      <div className="flex justify-center px-1" id="role-switcher-container">
+      {isRoleSimulatorEnabled && <div className="flex justify-center px-1" id="role-switcher-container">
         <div className="bg-surface-100 p-1 rounded-full flex gap-1 w-full max-w-[280px] border border-white/5">
           <button
             id="role-switch-admin"
@@ -1066,7 +1067,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
             Member View
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* ======================================================================
           ADMIN VIEW — COURSE MANAGEMENT (CMS) & QR SCANNER
@@ -1501,7 +1502,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
 
                           // Color Code: Sage >= required, Gold < required but >= 60, Cathedral < 60
                           const reqRate = stats.requiredRate;
-                          let rateColor = 'text-[#7BC47F] bg-[#7BC47F]/10 border-[#7BC47F]/20'; // Sage
+                          let rateColor = 'text-semantic-success bg-semantic-success/10 border-semantic-success/20';
                           let statusLabel = 'On Track';
                           if (rate < reqRate && rate >= 50) {
                             rateColor = 'text-[#D4A84A] bg-[#D4A84A]/10 border-[#D4A84A]/20'; // Gold
@@ -2038,7 +2039,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                         meta={`${course.schedule} · ${maxCount > 0 ? seatsLeft + ' seats left' : 'Unlimited seats'}`}
                         action={
                           isEnrolled ? (
-                            <span className="px-3 py-1 bg-emerald-500/15 border border-emerald-500/20 text-[#7BC47F] font-bold text-[10px] rounded-full">
+                            <span className="px-3 py-1 bg-semantic-success/10 border border-semantic-success/20 text-semantic-success font-bold text-[10px] rounded-full">
                               Enrolled ✓
                             </span>
                           ) : isFull ? (

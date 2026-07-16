@@ -166,14 +166,14 @@ export function StatBlock({
       id={id}
       className={`rounded-[20px] p-4 flex flex-col justify-between min-h-[115px] shadow-card-light dark:shadow-card-dark w-full transition-all duration-300 ${
         highlight
-          ? 'bg-gradient-to-br from-[#D4A84A] to-[#C8A45C] text-surface-0 shadow-glow-gold'
+          ? 'bg-gradient-to-br from-gold-300 to-gold-500 text-[#241B0B] shadow-glow-gold'
           : 'bg-white dark:bg-white/[0.04] border border-black/[0.04] dark:border-white/[0.06] text-theme-text'
       }`}
     >
       <div className="flex items-center justify-between w-full">
         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
           highlight 
-            ? 'bg-black/10 text-surface-0' 
+            ? 'bg-black/10 text-[#241B0B]'
             : 'bg-gold-500/10 text-gold-500'
         }`}>
           {icon}
@@ -181,9 +181,9 @@ export function StatBlock({
         {trend && (
           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5 ${
             highlight
-              ? 'bg-black/15 text-surface-0'
+              ? 'bg-black/15 text-[#241B0B]'
               : trend.direction === 'up'
-                ? 'bg-[#7BC47F]/15 text-[#7BC47F]'
+                ? 'bg-semantic-success/10 text-semantic-success'
                 : 'bg-cathedral-500/15 text-cathedral-400'
           }`}>
             {trend.direction === 'up' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -194,12 +194,12 @@ export function StatBlock({
 
       <div className="mt-3">
         <span className={`${Typography.DATA} block leading-none ${
-          highlight ? 'text-surface-0' : 'text-theme-text'
+          highlight ? 'text-[#241B0B]' : 'text-theme-text'
         }`}>
           {value}
         </span>
         <span className={`${Typography.CAPTION} mt-1 block ${
-          highlight ? 'text-surface-0/70' : 'text-theme-text-secondary'
+          highlight ? 'text-[#3D2E12]/80' : 'text-theme-text-secondary'
         }`}>
           {label}
         </span>
@@ -441,10 +441,10 @@ export function HeroCard({
   return (
     <div
       id={id}
-      className="relative bg-[#1A1A1E] rounded-card-lg overflow-hidden border border-white/5 dark:border-white/5 light:border-black/5 p-6 shadow-glow-cathedral min-h-[180px] flex flex-col justify-between"
+      className="relative bg-gradient-to-br from-white via-white to-cathedral-50 dark:from-[#1A1A1E] dark:via-[#1A1A1E] dark:to-cathedral-950 rounded-card-lg overflow-hidden border border-cathedral-100 dark:border-white/5 p-6 shadow-card-light dark:shadow-glow-cathedral min-h-[180px] flex flex-col justify-between"
     >
       {/* Absolute Background Pattern / Edge Glow */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#7B1D31]/30 to-transparent pointer-events-none z-0"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-cathedral-100/70 to-transparent dark:from-[#7B1D31]/30 pointer-events-none z-0"></div>
       
       {backgroundElement && (
         <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center opacity-10 pointer-events-none z-0 pr-6">
@@ -455,20 +455,20 @@ export function HeroCard({
       {/* Content details */}
       <div className="relative z-10 space-y-2">
         {eyebrow && (
-          <span className="text-[10px] font-bold uppercase tracking-widest text-[#C8A45C] block mb-1">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-cathedral-700 dark:text-gold-400 block mb-1">
             {eyebrow}
           </span>
         )}
-        <h2 className={`${Typography.TITLE} text-white font-extrabold tracking-tight`}>
+        <h2 className={`${Typography.TITLE} text-theme-text font-extrabold tracking-tight`}>
           {title}
         </h2>
         {subtitle && (
-          <p className="text-sm text-[#8A8A92] leading-relaxed">
+          <p className="text-sm text-theme-text-secondary leading-relaxed">
             {subtitle}
           </p>
         )}
         {meta && (
-          <p className="text-xs text-[#5A5A64]">
+          <p className="text-xs text-theme-text-muted">
             {meta}
           </p>
         )}
@@ -479,7 +479,7 @@ export function HeroCard({
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={onAction}
-            className="px-5 py-2 rounded-pill bg-[#C8A45C] text-black font-bold text-xs hover:bg-[#D4A84A] transition-colors cursor-pointer min-h-[36px] flex items-center shadow-lg"
+            className="px-5 py-2 rounded-pill bg-cathedral-700 dark:bg-gold-500 text-white dark:text-black font-bold text-xs hover:bg-cathedral-800 dark:hover:bg-gold-400 transition-colors cursor-pointer min-h-[40px] flex items-center shadow-md"
           >
             {actionLabel}
           </motion.button>
@@ -869,7 +869,7 @@ export function SearchField({
   return (
     <div
       id={id}
-      className="relative w-full h-12 flex items-center rounded-pill bg-surface-light-secondary dark:bg-surface-100 border border-transparent focus-within:ring-2 focus-within:ring-gold-500/40 focus-within:border-gold-500 dark:focus-within:border-gold-500 px-4 gap-3 transition-all duration-300 shadow-sm"
+      className="relative w-full h-12 flex items-center rounded-pill bg-white dark:bg-surface-100 border border-theme-border focus-within:ring-2 focus-within:ring-gold-500/30 focus-within:border-gold-600 dark:focus-within:border-gold-500 px-4 gap-3 transition-all duration-300 shadow-sm"
     >
       {/* Decorative Gold Ring / Standard Search Icon */}
       <div className="flex-shrink-0 flex items-center justify-center">

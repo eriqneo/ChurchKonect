@@ -44,8 +44,7 @@ import {
   RefreshCw,
   Eye,
   Bell,
-  Lock,
-  UserPlus
+  Lock
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -91,7 +90,7 @@ const PRESEEDED_ANNOUNCEMENTS = [
 
 export function ReportsModule() {
   const { isDark } = useTheme();
-  const { role, switchRole } = useCurrentUser();
+  const { role } = useCurrentUser();
 
   // Date range state
   const [dateRange, setDateRange] = useState<'This Week' | 'This Month' | 'This Quarter' | 'Custom'>('This Month');
@@ -385,31 +384,6 @@ export function ReportsModule() {
           </p>
         </div>
 
-        {/* ROLE SIMULATOR OVERLAY FOR REVIEWER CONVENIENCE */}
-        <div className="p-4 bg-gold-500/10 border border-gold-500/20 rounded-2xl max-w-sm w-full space-y-3">
-          <p className="text-[10px] font-bold text-gold-500 tracking-wider uppercase">
-            🛡️ Reviewer Portal (Role Simulator)
-          </p>
-          <p className="text-xs text-theme-text-secondary">
-            Instantly switch to an authorized role to test the complete reports workspace.
-          </p>
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <button
-              onClick={() => switchRole('lead_pastor')}
-              className="px-3 py-2 bg-gold-500 text-black rounded-xl text-xs font-black hover:bg-gold-600 active:scale-95 transition-all flex items-center justify-center gap-1.5"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Lead Pastor</span>
-            </button>
-            <button
-              onClick={() => switchRole('administrator')}
-              className="px-3 py-2 bg-theme-bg-secondary border border-gold-500/20 text-theme-text rounded-xl text-xs font-bold hover:bg-theme-text/5 active:scale-95 transition-all flex items-center justify-center gap-1.5"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-gold-500" />
-              <span>Admin Role</span>
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -436,20 +410,11 @@ export function ReportsModule() {
           HEADER SECTION & DATE PICKER
           ====================================================================== */}
       <div className="space-y-3.5">
-        <div className="flex items-center justify-between">
+        <div>
           <SectionTitle 
             title="Ministry Dashboard" 
             badge={{ label: 'Admin Panel', variant: 'gold' }} 
           />
-          
-          {/* Quick toggle to revert role for testing */}
-          <button 
-            onClick={() => switchRole('member')}
-            className="text-[10px] font-bold text-theme-text-secondary flex items-center gap-1 border border-theme-border rounded-full px-2.5 py-1 hover:text-cathedral-400"
-          >
-            <Lock className="w-2.5 h-2.5" />
-            <span>Lock view</span>
-          </button>
         </div>
 
         {/* Date Selector scrollable strip */}
@@ -479,14 +444,14 @@ export function ReportsModule() {
       <div className="grid grid-cols-2 gap-3">
 
         {/* Hero tile: Average Cell Attendance — spans full width, ring visual */}
-        <div className="col-span-2 rounded-[20px] p-4 flex items-center justify-between bg-gradient-to-br from-[#D4A84A] to-[#C8A45C] text-surface-0 shadow-glow-gold">
+        <div className="col-span-2 rounded-[20px] p-4 flex items-center justify-between bg-gradient-to-br from-gold-300 to-gold-500 text-[#241B0B] shadow-glow-gold">
           <div>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-black/15 text-surface-0 inline-flex items-center gap-0.5 mb-2">
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-black/10 text-[#241B0B] inline-flex items-center gap-0.5 mb-2">
               <TrendingUp className="w-3 h-3" />
               +3.2%
             </span>
-            <p className={`${Typography.SUBTITLE} font-black text-surface-0`}>Average Cell Attendance</p>
-            <p className={`${Typography.CAPTION} text-surface-0/70 mt-0.5`}>Across all active fellowship groups</p>
+            <p className={`${Typography.SUBTITLE} font-black text-[#241B0B]`}>Average Cell Attendance</p>
+            <p className={`${Typography.CAPTION} text-[#3D2E12]/80 mt-0.5`}>Across all active fellowship groups</p>
           </div>
           <ProgressRing percent={78} size={72} color="#0C0C0E" trackColor="rgba(0,0,0,0.15)" />
         </div>

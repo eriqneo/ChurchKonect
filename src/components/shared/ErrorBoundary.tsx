@@ -44,7 +44,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#0d0f12] flex flex-col items-center justify-center p-6 text-center text-white">
+        <div className="min-h-screen bg-theme-bg flex flex-col items-center justify-center p-6 text-center text-theme-text">
           <div className="max-w-md w-full flex flex-col items-center">
             {/* Alert-triangle icon */}
             <div className="w-14 h-14 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mb-5 animate-pulse">
@@ -52,7 +52,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </div>
 
             {/* Title */}
-            <h2 className={`${Typography.SUBTITLE} text-white text-lg font-bold tracking-tight mb-2`}>
+            <h2 className={`${Typography.SUBTITLE} text-theme-text text-lg font-bold tracking-tight mb-2`}>
               Something went wrong
             </h2>
 
@@ -63,10 +63,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
             {/* Collapsible Error Detail */}
             {this.state.error && (
-              <div className="w-full bg-white/[0.02] border border-white/[0.04] rounded-lg p-3 mb-6 text-left overflow-hidden">
+              <div className="w-full bg-theme-card border border-theme-border rounded-lg p-3 mb-6 text-left overflow-hidden shadow-card-light dark:shadow-card-dark">
                 <button
                   onClick={this.toggleDetails}
-                  className="w-full flex items-center justify-between text-xs text-text-secondary font-semibold hover:text-white transition-colors focus:outline-none"
+                  className="w-full flex items-center justify-between text-xs text-text-secondary font-semibold hover:text-theme-text transition-colors focus:outline-none"
                 >
                   <span className="font-mono">Error Signature</span>
                   {this.state.showDetails ? (

@@ -97,20 +97,15 @@ interface PrayerRequestRecordExtended extends PrayerRequestRecord {
 
 export function PrayerModule() {
   const { isDark } = useTheme();
-  const { user: currentUser, role: currentRole, switchRole } = useCurrentUser();
+  const { user: currentUser, role: currentRole } = useCurrentUser();
 
   // --------------------------------------
   // Simulated Roles & Dept controls (Oversight/Vigil controls)
   // --------------------------------------
-  const [isIntercessoryWorker, setIsIntercessoryWorker] = useState<boolean>(() => {
-    const saved = localStorage.getItem('cc_is_intercessory_worker');
-    if (saved !== null) return saved === 'true';
-    return currentRole?.id === 'lead_pastor' || currentRole?.id === 'administrator' || currentRole?.id === 'cell_leader';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('cc_is_intercessory_worker', isIntercessoryWorker ? 'true' : 'false');
-  }, [isIntercessoryWorker]);
+  const isIntercessoryWorker =
+    currentRole?.id === 'lead_pastor' ||
+    currentRole?.id === 'administrator' ||
+    currentRole?.department.toLowerCase().includes('intercess');
 
   const hasPrayerBankAccess = currentRole?.id === 'lead_pastor' || currentRole?.id === 'administrator' || isIntercessoryWorker;
   const hasTriageAccess = currentRole?.id === 'lead_pastor' || currentRole?.id === 'administrator';
@@ -731,58 +726,6 @@ export function PrayerModule() {
       `}} />
 
       {/* ======================================================================
-          SIMULATION OVERSIGHT CONTROLS (Demo Ribbon)
-          ====================================================================== */}
-      <div className="no-print mb-6 relative z-10 max-w-md mx-auto">
-        <div className="bg-surface-200/25 dark:bg-black/45 backdrop-blur-md p-3.5 rounded-2xl border border-white/5 shadow-lg space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-widest text-gold-500 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              Vigil Role Simulation
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] font-bold text-text-secondary">Intercessory Department:</span>
-              <button
-                id="toggle-dept-worker"
-                onClick={() => { playHaptic(); setIsIntercessoryWorker(!isIntercessoryWorker); }}
-                className={`w-8 h-4.5 rounded-full p-0.5 transition-all ${
-                  isIntercessoryWorker ? 'bg-gold-500' : 'bg-surface-300'
-                }`}
-              >
-                <div 
-                  className={`w-3.5 h-3.5 rounded-full bg-black transition-all transform ${
-                    isIntercessoryWorker ? 'translate-x-3.5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-4 gap-1.5 text-[9px] font-black uppercase tracking-wider text-center">
-            {[
-              { id: 'member', label: 'Member' },
-              { id: 'cell_leader', label: 'Leader' },
-              { id: 'administrator', label: 'Admin' },
-              { id: 'lead_pastor', label: 'Pastor' },
-            ].map(r => (
-              <button
-                key={r.id}
-                id={`sim-role-${r.id}`}
-                onClick={() => { playHaptic(); switchRole(r.id); }}
-                className={`py-1 rounded-lg transition-colors ${
-                  currentRole?.id === r.id 
-                    ? 'bg-gold-500 text-black font-black' 
-                    : 'bg-white/5 hover:bg-white/10 text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ======================================================================
           PRIMARY MODULE TAB STRIP (Adapts based on simulation credentials)
           ====================================================================== */}
       <div className="no-print flex justify-center px-1 mb-6 relative z-10 max-w-md mx-auto">
@@ -1094,7 +1037,7 @@ export function PrayerModule() {
 
                     {/* Assigned intercessor visibility */}
                     {prayer.status === 'assigned' && (
-                      <div className="pt-2 flex items-center justify-between text-[11px] text-[#7BC47F] border-t border-white/5 font-semibold">
+                      <div className="pt-2 flex items-center justify-between text-[11px] text-semantic-success border-t border-white/5 font-semibold">
                         <span className="flex items-center gap-1">
                           <User className="w-3.5 h-3.5" />
                           {prayer.isAnonymous ? 'Private Watch' : `Intercessor: ${prayer.assignedTo || 'Assigned Worker'}`}
@@ -1765,7 +1708,7 @@ export function PrayerModule() {
                       </div>
 
                       {prayer.assignedTo && (
-                        <span className="text-[10px] font-bold text-[#7BC47F] bg-[#7BC47F]/10 border border-[#7BC47F]/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="text-[10px] font-bold text-semantic-success bg-semantic-success/10 border border-semantic-success/20 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <User className="w-3 h-3" />
                           {prayer.assignedTo}
                         </span>

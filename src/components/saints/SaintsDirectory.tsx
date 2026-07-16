@@ -1072,7 +1072,7 @@ export function SaintsDirectory() {
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-text-muted font-bold">Account Verification</span>
-                <span className="text-[#7BC47F] font-bold flex items-center gap-1">
+                <span className="text-semantic-success font-bold flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5" /> SECURE
                 </span>
               </div>
@@ -1115,10 +1115,10 @@ export function SaintsDirectory() {
                 </span>
                 <AccentBadge label={selectedCell.status} variant="sage" size="sm" />
               </div>
-              <h3 className="text-lg font-extrabold text-white">
+              <h3 className="text-lg font-extrabold text-theme-text">
                 {selectedCell.name}
               </h3>
-              <p className="text-xs text-white/70">
+              <p className="text-xs text-theme-text-secondary">
                 Meets every Wednesday evening at 7:00 PM for Worship, Word & Communion.
               </p>
             </div>
@@ -1138,7 +1138,7 @@ export function SaintsDirectory() {
               </div>
               <div className="flex justify-between py-1.5 border-b border-white/[0.04]">
                 <span className="text-text-muted font-bold">Weekly reports submitted</span>
-                <span className="text-[#7BC47F] font-bold">98% compliance</span>
+                <span className="text-semantic-success font-bold">98% compliance</span>
               </div>
             </div>
 

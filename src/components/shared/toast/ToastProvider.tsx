@@ -69,7 +69,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
             switch (toast.type) {
               case 'success':
-                bgClass = 'bg-sage-500'; // sage bg
+                bgClass = 'bg-[#3F7C45] dark:bg-sage-600';
                 textClass = 'text-white';
                 icon = <Check className="w-4.5 h-4.5 stroke-[2.5]" />;
                 break;

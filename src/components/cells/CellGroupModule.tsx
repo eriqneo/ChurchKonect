@@ -25,6 +25,7 @@ import {
   Avatar
 } from '../shared';
 import { staggerChildren, useCountUp } from '../../lib/animations';
+import { isRoleSimulatorEnabled } from '../../lib/auth/roles';
 import { 
   Check, 
   SlidersHorizontal,
@@ -857,7 +858,7 @@ export function CellGroupModule() {
             initial={{ opacity: 0, y: 50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] bg-zinc-900 border border-gold-500/30 px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 max-w-sm w-[90%] text-left"
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] bg-theme-card border border-theme-border px-4 py-2.5 rounded-xl shadow-float flex items-center gap-2 max-w-sm w-[90%] text-left"
           >
             <div className="w-2 h-2 rounded-full bg-gold-500 animate-ping" />
             <span className="text-xs font-semibold text-text-primary leading-tight">
@@ -870,7 +871,7 @@ export function CellGroupModule() {
       {/* --------------------------------------
           CAPSULE MODULE SWITCHER (3 ROLES)
          -------------------------------------- */}
-      <div className="flex justify-center px-1">
+      {isRoleSimulatorEnabled && <div className="flex justify-center px-1">
         <div className="bg-surface-100 p-0.5 rounded-full flex gap-1 w-full max-w-[340px] border border-white/5">
           <button
             id="role-btn-admin"
@@ -911,7 +912,7 @@ export function CellGroupModule() {
             Pastor Rev
           </button>
         </div>
-      </div>
+      </div>}
 
 
       {/* ======================================================================
@@ -1005,7 +1006,7 @@ export function CellGroupModule() {
 
                           <div className="flex flex-col items-end gap-1.5">
                             <span className={`text-[9px] font-black tracking-widest px-2 py-0.5 rounded-full ${
-                              isActive ? 'bg-[#7BC47F]/15 text-[#7BC47F]' : 'bg-surface-200 text-text-muted'
+                              isActive ? 'bg-semantic-success/10 text-semantic-success' : 'bg-surface-200 text-text-muted'
                             }`}>
                               {isActive ? 'Active' : 'Inactive'}
                             </span>
@@ -1416,14 +1417,14 @@ export function CellGroupModule() {
             ) : (
               <GlassCard className="border-l-4 border-l-[#7BC47F] p-4 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-[#7BC47F]/10 flex items-center justify-center text-[#7BC47F]">
+                  <div className="w-8 h-8 rounded-full bg-semantic-success/10 flex items-center justify-center text-semantic-success">
                     <Clock className="w-4.5 h-4.5 animate-pulse" />
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-text-primary">
                       Fellowship Active (Timer)
                     </h4>
-                    <span className="text-xs font-mono font-extrabold text-[#7BC47F]">
+                    <span className="text-xs font-mono font-extrabold text-semantic-success">
                       {formatTimer(elapsedSeconds)}
                     </span>
                   </div>
@@ -1601,7 +1602,7 @@ export function CellGroupModule() {
             <div className="text-[11px] font-bold text-text-secondary flex items-center gap-1.5 w-full justify-between">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#7BC47F] animate-pulse" /> Live Metrics:</span>
               <div className={`flex gap-2.5 text-xs ${Typography.METRIC}`}>
-                <span className="text-[#7BC47F] font-black">{presentCount} present</span>
+                <span className="text-semantic-success font-black">{presentCount} present</span>
                 <span className="text-text-muted font-light">•</span>
                 <span className="text-gold-400 font-black">{excusedCount} excused</span>
                 <span className="text-text-muted font-light">•</span>
@@ -1628,10 +1629,10 @@ export function CellGroupModule() {
                       </span>
                       <div className="grid grid-cols-3 gap-2.5">
                         <div className="bg-[#7BC47F]/10 border border-[#7BC47F]/15 rounded-xl p-3 text-center">
-                          <span className="block text-lg font-black text-[#7BC47F] font-mono">
+                          <span className="block text-lg font-black text-semantic-success font-mono">
                             {liveRollCount.present}
                           </span>
-                          <span className="text-[9px] font-black text-[#7BC47F] uppercase tracking-wider">
+                          <span className="text-[9px] font-black text-semantic-success uppercase tracking-wider">
                             Present
                           </span>
                         </div>
