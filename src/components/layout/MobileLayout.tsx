@@ -425,7 +425,7 @@ export function MobileLayout() {
            ========================================== */}
         <div
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto pt-[calc(3.5rem+var(--safe-top))] pb-[calc(5rem+var(--safe-bottom))] md:pt-24 md:pb-28 px-4 relative z-10 scrollbar-thin scroll-smooth"
+          className="flex-1 overflow-y-auto pt-[calc(3.5rem+var(--safe-top))] pb-[calc(var(--bottom-nav-height)+var(--safe-bottom)+0.75rem)] md:pt-24 md:pb-28 px-4 relative z-10 scrollbar-thin scroll-smooth"
         >
           <AnimatePresence mode="wait">
             <motion.div
@@ -719,7 +719,7 @@ export function MobileLayout() {
               initial={{ y: 50, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
-              className={`absolute bottom-[calc(5rem+var(--safe-bottom))] md:bottom-20 left-0 right-0 h-9 z-40 flex items-center justify-between px-5 transition-all ${
+              className={`absolute bottom-[calc(var(--bottom-nav-height)+var(--safe-bottom))] md:bottom-20 left-0 right-0 h-9 z-40 flex items-center justify-between px-5 transition-all ${
                 !isOnline 
                   ? 'bg-cathedral-900 text-white border-t border-cathedral-800' 
                   : 'bg-[#7BC47F] text-black border-t border-[#6BB36E]'
@@ -938,7 +938,7 @@ export function MobileLayout() {
         {/* ==========================================
             DEV SIMULATOR (Environment-Gated Floating Pill)
            ========================================== */}
-        <div className="absolute bottom-[calc(5.75rem+var(--safe-bottom))] md:bottom-[92px] right-4 z-40">
+        <div className="absolute bottom-[calc(var(--bottom-nav-height)+var(--safe-bottom)+0.75rem)] md:bottom-[92px] right-4 z-40">
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => { triggerHaptic(); setShowRoleSelector(true); }}

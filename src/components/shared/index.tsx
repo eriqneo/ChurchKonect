@@ -576,7 +576,7 @@ export function GlowTabBar({
   return (
     <div
       id={id}
-      className="absolute bottom-0 left-0 right-0 min-h-20 pb-[var(--safe-bottom)] bg-theme-bg/90 backdrop-blur-md border-t border-theme-border flex items-center justify-around px-6 z-50"
+      className="absolute inset-x-0 bottom-0 h-[calc(var(--bottom-nav-height)+var(--safe-bottom))] box-border pb-[var(--safe-bottom)] pl-[max(0.75rem,var(--safe-left))] pr-[max(0.75rem,var(--safe-right))] bg-theme-bg/92 backdrop-blur-xl border-t border-theme-border flex items-center justify-around z-50 shadow-[0_-8px_24px_rgba(0,0,0,0.06)]"
     >
       {tabs.map((tab) => {
         const isCenter = tab.id === centerTabId;
@@ -584,19 +584,21 @@ export function GlowTabBar({
 
         if (isCenter) {
           return (
-            <div key={tab.id} className="relative -top-5 flex flex-col items-center justify-center">
+            <div key={tab.id} className="relative -translate-y-2 flex flex-col items-center justify-center">
               {/* Backing Glow Aura */}
-              <div className="absolute w-20 h-20 bg-gold-500/25 rounded-full blur-xl pointer-events-none -z-10 animate-pulse"></div>
+              <div className="absolute w-16 h-16 bg-gold-500/20 rounded-full blur-xl pointer-events-none -z-10 animate-pulse"></div>
 
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 onClick={() => handleTabClick(tab.id)}
-                className="w-14 h-14 bg-gradient-to-br from-[#D4A84A] to-[#C8A45C] rounded-full flex items-center justify-center text-black shadow-[0_0_15px_rgba(200,164,92,0.4)] border-4 border-theme-bg cursor-pointer z-10 hover:scale-105 transition-transform"
+                className="w-13 h-13 bg-gradient-to-br from-[#D4A84A] to-[#C8A45C] rounded-full flex items-center justify-center text-black shadow-[0_0_15px_rgba(200,164,92,0.4)] border-[3px] border-theme-bg cursor-pointer z-10 hover:scale-105 transition-transform"
+                aria-label={tab.label}
+                aria-current={isActive ? 'page' : undefined}
                 title={tab.label}
               >
                 {tab.icon}
               </motion.button>
-              <span className="text-[10px] font-extrabold text-gold-500 tracking-wider mt-1.5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
+              <span className="text-[9px] leading-none font-extrabold text-gold-500 tracking-wider mt-1 drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
                 {tab.label}
               </span>
             </div>
@@ -608,6 +610,8 @@ export function GlowTabBar({
             key={tab.id}
             whileTap={{ scale: 0.9 }}
             onClick={() => handleTabClick(tab.id)}
+            aria-label={tab.label}
+            aria-current={isActive ? 'page' : undefined}
             className={`relative flex flex-col items-center justify-center transition-colors cursor-pointer min-h-[44px] min-w-[44px] ${
               isActive
                 ? 'text-gold-500 font-bold'
@@ -624,7 +628,7 @@ export function GlowTabBar({
             <div className={`${isActive ? 'scale-105 text-gold-500' : ''} transition-transform`}>
               {tab.icon}
             </div>
-            <span className="text-[10px] mt-1 font-bold">
+            <span className="text-[9px] leading-none mt-1 font-bold">
               {tab.label}
             </span>
           </motion.button>

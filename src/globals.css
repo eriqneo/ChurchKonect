@@ -115,6 +115,9 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Native-style navigation row; the device home-indicator inset is added separately. */
+  --bottom-nav-height: 4rem;
 }
 
 .dark, html.dark {
@@ -388,6 +391,5 @@ html.light .shimmer-base {
 .bg-surface-400 {
   background-color: var(--surface-400) !important;
 }
-
 
 
