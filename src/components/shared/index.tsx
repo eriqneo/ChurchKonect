@@ -441,10 +441,10 @@ export function HeroCard({
   return (
     <div
       id={id}
-      className="relative bg-gradient-to-br from-white via-white to-cathedral-50 dark:from-[#1A1A1E] dark:via-[#1A1A1E] dark:to-cathedral-950 rounded-card-lg overflow-hidden border border-cathedral-100 dark:border-white/5 p-6 shadow-card-light dark:shadow-glow-cathedral min-h-[180px] flex flex-col justify-between"
+      className="relative bg-gradient-to-br from-[#2B1920] via-[#24151A] to-cathedral-950 rounded-card-lg overflow-hidden border border-white/10 p-6 shadow-[0_10px_28px_rgba(61,14,24,0.18)] min-h-[180px] flex flex-col justify-between"
     >
       {/* Absolute Background Pattern / Edge Glow */}
-      <div className="absolute inset-0 bg-gradient-to-br from-cathedral-100/70 to-transparent dark:from-[#7B1D31]/30 pointer-events-none z-0"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-cathedral-700/30 via-transparent to-black/10 pointer-events-none z-0"></div>
       
       {backgroundElement && (
         <div className="absolute right-0 top-0 bottom-0 flex items-center justify-center opacity-10 pointer-events-none z-0 pr-6">
@@ -455,20 +455,20 @@ export function HeroCard({
       {/* Content details */}
       <div className="relative z-10 space-y-2">
         {eyebrow && (
-          <span className="text-[10px] font-bold uppercase tracking-widest text-cathedral-700 dark:text-gold-400 block mb-1">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gold-300 block mb-1">
             {eyebrow}
           </span>
         )}
-        <h2 className={`${Typography.TITLE} text-theme-text font-extrabold tracking-tight`}>
+        <h2 className={`${Typography.TITLE} text-white font-extrabold tracking-tight`}>
           {title}
         </h2>
         {subtitle && (
-          <p className="text-sm text-theme-text-secondary leading-relaxed">
+          <p className="text-sm text-white/72 leading-relaxed">
             {subtitle}
           </p>
         )}
         {meta && (
-          <p className="text-xs text-theme-text-muted">
+          <p className="text-xs text-white/55">
             {meta}
           </p>
         )}
@@ -479,7 +479,7 @@ export function HeroCard({
           <motion.button
             whileTap={{ scale: 0.96 }}
             onClick={onAction}
-            className="px-5 py-2 rounded-pill bg-cathedral-700 dark:bg-gold-500 text-white dark:text-black font-bold text-xs hover:bg-cathedral-800 dark:hover:bg-gold-400 transition-colors cursor-pointer min-h-[40px] flex items-center shadow-md"
+            className="px-5 py-2 rounded-pill bg-gold-300 text-[#241B0B] font-bold text-xs hover:bg-gold-200 transition-colors cursor-pointer min-h-[40px] flex items-center shadow-md"
           >
             {actionLabel}
           </motion.button>
