@@ -95,6 +95,9 @@ export function MobileLayout() {
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [pendingChanges, setPendingChanges] = useState<number>(0);
   const [scrolled, setScrolled] = useState<boolean>(false);
+  const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
+  const lastScrollTopRef = useRef(0);
+  const directionalTravelRef = useRef(0);
   const [notifications, setNotifications] = useState<number>(3);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   
@@ -161,13 +164,37 @@ export function MobileLayout() {
   const activeUserId = user!.id;
   const { unreadCount: activeUnreadCount } = useNotifications(activeUserId);
 
-  // Detect scroll to style the header glassmorphism
+  // Reveal the navigation whenever the active workspace or a global overlay changes.
+  useEffect(() => {
+    setIsHeaderVisible(true);
+    directionalTravelRef.current = 0;
+  }, [activeTab, isDrawerOpen, isNotificationsOpen]);
+
+  // Direction-aware mobile header: hide on deliberate downward travel, reveal quickly upward.
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (e.currentTarget.scrollTop > 20) {
-      if (!scrolled) setScrolled(true);
-    } else {
-      if (scrolled) setScrolled(false);
+    const currentScrollTop = Math.max(0, e.currentTarget.scrollTop);
+    const delta = currentScrollTop - lastScrollTopRef.current;
+
+    setScrolled(currentScrollTop > 20);
+
+    if (currentScrollTop <= 24) {
+      setIsHeaderVisible(true);
+      directionalTravelRef.current = 0;
+    } else if (delta > 0) {
+      directionalTravelRef.current = Math.max(0, directionalTravelRef.current) + delta;
+      if (currentScrollTop > 96 && directionalTravelRef.current > 28) {
+        setIsHeaderVisible(false);
+        directionalTravelRef.current = 0;
+      }
+    } else if (delta < 0) {
+      directionalTravelRef.current = Math.min(0, directionalTravelRef.current) + delta;
+      if (directionalTravelRef.current < -12) {
+        setIsHeaderVisible(true);
+        directionalTravelRef.current = 0;
+      }
     }
+
+    lastScrollTopRef.current = currentScrollTop;
   };
 
   // Sync Bell Indicator Color
@@ -326,9 +353,13 @@ export function MobileLayout() {
             SCREEN HEADER BAR (56px)
            ========================================== */}
         <header
-          className={`absolute top-0 md:top-10 left-0 right-0 min-h-14 pt-[var(--safe-top)] md:pt-0 px-4 flex items-center justify-between z-40 transition-all duration-300 ${
+          className={`absolute top-0 md:top-10 left-0 right-0 min-h-14 pt-[var(--safe-top)] md:pt-0 px-4 flex items-center justify-between z-40 will-change-transform transition-[transform,opacity,background-color,box-shadow,border-color] duration-250 ease-out md:translate-y-0 md:opacity-100 md:pointer-events-auto ${
+            isHeaderVisible || isDrawerOpen || isNotificationsOpen
+              ? 'translate-y-0 opacity-100 pointer-events-auto'
+              : '-translate-y-full opacity-0 pointer-events-none'
+          } ${
             scrolled
-              ? 'bg-white/70 dark:bg-surface-100/70 backdrop-blur-md border-b border-theme-border shadow-sm'
+              ? 'bg-white/88 dark:bg-surface-100/88 backdrop-blur-xl border-b border-theme-border shadow-sm'
               : 'bg-transparent'
           }`}
         >
