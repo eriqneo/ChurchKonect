@@ -4,7 +4,6 @@ import {
   db,
   generateUUID,
   createLocalRecord,
-  putAppSetting,
   type MemberRecord,
   type CellGroupRecord,
   type CellMeetingRecord,
@@ -23,6 +22,8 @@ import {
   type FeedbackRecord
 } from './churchConnectDB';
 import { syncEngine, type SyncProgress } from './SyncEngine';
+import { useAuth } from './PocketBaseProvider';
+import { getRoleView } from '../auth/roles';
 
 // Helper to trigger background sync when modifications happen
 const triggerAutoSync = () => {
@@ -710,48 +711,20 @@ export function useSync() {
 // ==========================================
 // 10. useCurrentUser() Hook
 // ==========================================
-const ROLES = [
-  { id: 'lead_pastor', label: 'LEAD PASTOR', name: 'Pastor David', isAdmin: true, avatarText: 'PD' },
-  { id: 'administrator', label: 'ADMINISTRATOR', name: 'Sarah Jenkins', isAdmin: true, avatarText: 'SJ' },
-  { id: 'cell_leader', label: 'CELL LEADER', name: 'Michael Sterns', isAdmin: false, avatarText: 'MS' },
-  { id: 'member', label: 'CHURCH SAINT', name: 'Sister Clara Oswald', isAdmin: false, avatarText: 'CO' }
-];
-
 export function useCurrentUser() {
-  const currentRoleSetting = useLiveQuery(async () => {
-    return await db.appSettings.where('key').equals('currentRole').first();
-  }, []);
-
-  const currentRole = currentRoleSetting ? currentRoleSetting.value : ROLES[2]; // Default to Cell Leader (Michael) for visual focus
+  const { user } = useAuth();
+  const currentRole = user ? getRoleView(user) : null;
 
   const switchRole = useCallback(async (roleId: string) => {
-    const selected = ROLES.find(r => r.id === roleId);
-    if (selected) {
-      await putAppSetting('currentRole', selected);
-      triggerHaptic();
-
-      await db.auditLogs.add({
-        localId: generateUUID(),
-        userId: selected.id,
-        userName: selected.name,
-        action: 'role_switch',
-        details: `Switched roles to: ${selected.label}`,
-        createdAt: new Date().toISOString()
-      });
+    if (user && roleId !== user.role) {
+      console.warn('[Auth] Role switching is disabled; authenticate with the intended test account instead.');
     }
-  }, []);
+    triggerHaptic();
+  }, [user]);
 
   return {
-    user: {
-      localId: currentRole?.id === 'lead_pastor' ? 'user-pastor-david' : 
-               currentRole?.id === 'administrator' ? 'user-admin-sarah' :
-               currentRole?.id === 'cell_leader' ? 'user-cell-leader-michael' : 'user-member-clara',
-      name: currentRole?.name || 'Michael Sterns',
-      email: currentRole?.id === 'lead_pastor' ? 'pastor.david@churchconnect.com' : 
-             currentRole?.id === 'administrator' ? 'sarah.admin@churchconnect.com' :
-             currentRole?.id === 'cell_leader' ? 'michael.hope@churchconnect.com' : 'clara.saints@churchconnect.com'
-    },
-    role: currentRole || ROLES[2],
+    user: user ? { localId: user.id, name: user.name, email: user.email } : null,
+    role: currentRole,
     switchRole
   };
 }

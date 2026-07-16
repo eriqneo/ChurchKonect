@@ -59,35 +59,33 @@ import { CommunicationModule } from '../communication/CommunicationModule';
 import { NotificationSystem } from '../communication/NotificationSystem';
 import { useNotifications } from '../../lib/db/hooks';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { APP_ROLES, getRoleView } from '../../lib/auth/roles';
 
 
 
 // ==========================================
 // 7 Role Definitions
 // ==========================================
-export const ROLES = [
-  { id: 'lead_pastor', label: 'Lead Pastor', name: 'Pastor David', avatarText: 'PD', department: 'Executive Clergy', isAdmin: true },
-  { id: 'admin', label: 'Administrator', name: 'Sarah Jenkins', avatarText: 'SJ', department: 'Operations & Finance', isAdmin: true },
-  { id: 'cell_leader', label: 'Cell Leader', name: 'Brother Michael', avatarText: 'BM', department: 'Hope Cell Group', isAdmin: false },
-  { id: 'district_pastor', label: 'District Pastor', name: 'Pastor Abraham', avatarText: 'PA', department: 'North District', isAdmin: true },
-  { id: 'department_head', label: 'Department Head', name: 'Sister Grace', avatarText: 'SG', department: 'Worship Ministry', isAdmin: false },
-  { id: 'member', label: 'Regular Member', name: 'John Doe', avatarText: 'JD', department: 'General Congregation', isAdmin: false },
-  { id: 'guest', label: 'Guest / Seeker', name: 'visitor_492', avatarText: 'VS', department: 'First-time Welcome', isAdmin: false }
-];
+export const ROLES = APP_ROLES;
+
+const ENABLE_ROLE_SIMULATOR = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ROLE_SIMULATOR === 'true';
 
 export function MobileLayout() {
   const { theme, toggleTheme, isDark } = useTheme();
-  const { user, login, logout } = useAuth();
+  const { user, logout } = useAuth();
 
   // Navigation and State
   const [activeTab, setActiveTab] = useState<string>('home');
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
-  const [currentRoleIndex, setCurrentRoleIndex] = useState<number>(0);
+  const [currentRoleIndex, setCurrentRoleIndex] = useState<number>(() => {
+    const index = ROLES.findIndex((role) => role.id === user?.role);
+    return index >= 0 ? index : 0;
+  });
 
   // Synchronize currentRoleIndex with active authenticated user
   useEffect(() => {
     if (user) {
-      const idx = ROLES.findIndex(r => r.id === user.role || (r.id === 'admin' && user.role === 'administrator'));
+      const idx = ROLES.findIndex(r => r.id === user.role);
       if (idx !== -1) {
         setCurrentRoleIndex(idx);
       }
@@ -158,11 +156,9 @@ export function MobileLayout() {
     };
   }, []);
 
-  const currentRole = ROLES[currentRoleIndex];
+  const currentRole = getRoleView(user!);
   
-  const activeUserId = currentRole.id === 'lead_pastor' ? 'user-pastor-david' : 
-                       currentRole.id === 'admin' ? 'user-admin-sarah' :
-                       currentRole.id === 'cell_leader' ? 'user-cell-leader-michael' : 'user-member-clara';
+  const activeUserId = user!.id;
   const { unreadCount: activeUnreadCount } = useNotifications(activeUserId);
 
   // Detect scroll to style the header glassmorphism
@@ -938,7 +934,7 @@ export function MobileLayout() {
         {/* ==========================================
             DEV SIMULATOR (Environment-Gated Floating Pill)
            ========================================== */}
-        <div className="absolute bottom-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe)+0.75rem)] md:bottom-[92px] right-4 z-40">
+        {ENABLE_ROLE_SIMULATOR && <div className="absolute bottom-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe)+0.75rem)] md:bottom-[92px] right-4 z-40">
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => { triggerHaptic(); setShowRoleSelector(true); }}
@@ -947,12 +943,12 @@ export function MobileLayout() {
             <span className="w-1.5 h-1.5 rounded-full bg-gold-500 animate-pulse"></span>
             <span>DEV MODE</span>
           </motion.button>
-        </div>
+        </div>}
 
         {/* ==========================================
             DEV ROLE SELECTOR (BottomSheet)
            ========================================== */}
-        <BottomSheet
+        {ENABLE_ROLE_SIMULATOR && <BottomSheet
           isOpen={showRoleSelector}
           onClose={() => setShowRoleSelector(false)}
           title="Simulator Settings"
@@ -975,23 +971,6 @@ export function MobileLayout() {
                       onClick={async () => {
                         triggerHaptic();
                         setCurrentRoleIndex(idx);
-                        
-                        // Dynamically login simulated user to keep PocketBase session synced
-                        const emailMap: Record<string, string> = {
-                          lead_pastor: 'pastor.david@churchconnect.com',
-                          admin: 'sarah.admin@churchconnect.com',
-                          cell_leader: 'michael.hope@churchconnect.com',
-                          district_pastor: 'pastor.david@churchconnect.com',
-                          department_head: 'michael.hope@churchconnect.com',
-                          member: 'clara.saints@churchconnect.com',
-                          guest: 'clara.saints@churchconnect.com'
-                        };
-                        const targetEmail = emailMap[role.id] || 'clara.saints@churchconnect.com';
-                        try {
-                          await login(targetEmail);
-                        } catch (e) {
-                          console.error('Failed to sync login:', e);
-                        }
                         
                         setShowRoleSelector(false);
                       }}
@@ -1058,7 +1037,7 @@ export function MobileLayout() {
               </div>
             </div>
           </div>
-        </BottomSheet>
+        </BottomSheet>}
 
         {/* ==========================================
             QR SCANNER SIMULATOR MODAL (BottomSheet Detent)

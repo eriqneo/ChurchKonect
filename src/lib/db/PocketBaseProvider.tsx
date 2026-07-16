@@ -1,5 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { db, putAppSetting } from './churchConnectDB';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import type PocketBase from 'pocketbase';
+import type { RecordModel } from 'pocketbase';
+import { db, generateUUID } from './churchConnectDB';
+import { initialsForName, normalizeRoleId } from '../auth/roles';
+import { isPocketBaseConfigured, pb } from '../pocketbase/client';
 
 export interface AuthUser {
   id: string;
@@ -7,190 +11,149 @@ export interface AuthUser {
   name: string;
   role: string;
   avatarText: string;
+  department: string;
+  status: string;
+  verified: boolean;
 }
 
 interface PocketBaseContextType {
-  pb: any; // Simulated PocketBase Client
+  pb: PocketBase;
   user: AuthUser | null;
   isLoading: boolean;
-  login: (email: string, password?: string) => Promise<AuthUser>;
+  isConfigured: boolean;
+  login: (email: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   updateUserBadge: (count: number) => void;
 }
 
 const PocketBaseContext = createContext<PocketBaseContextType | null>(null);
 
-// Simulated PocketBase client subscriptions
-const mockPBClient = {
-  collection: (name: string) => ({
-    subscribe: (id: string, callback: (event: any) => void) => {
-      console.log(`[PocketBase Realtime] Subscribed to collection: ${name}, id: ${id}`);
-      return () => {
-        console.log(`[PocketBase Realtime] Unsubscribed from collection: ${name}, id: ${id}`);
-      };
-    },
-    unsubscribe: (id: string) => {
-      console.log(`[PocketBase Realtime] Unsubscribed from collection: ${name}, id: ${id}`);
-    }
-  })
-};
+function toAuthUser(record: RecordModel | null): AuthUser | null {
+  if (!record) return null;
+
+  const name = typeof record.name === 'string' && record.name.trim()
+    ? record.name.trim()
+    : record.email;
+
+  return {
+    id: record.id,
+    email: record.email,
+    name,
+    role: normalizeRoleId(record.role),
+    avatarText: typeof record.avatarText === 'string' && record.avatarText.trim()
+      ? record.avatarText.trim().slice(0, 4).toUpperCase()
+      : initialsForName(name),
+    department: typeof record.department === 'string' ? record.department : '',
+    status: typeof record.status === 'string' ? record.status : 'active',
+    verified: Boolean(record.verified)
+  };
+}
+
+async function writeLocalAudit(user: AuthUser, action: string, details: string): Promise<void> {
+  try {
+    await db.auditLogs.add({
+      localId: generateUUID(),
+      userId: user.id,
+      userName: user.name,
+      action,
+      details,
+      createdAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.warn('[Auth] Local audit write failed:', error);
+  }
+}
+
+async function clearLegacyIdentity(): Promise<void> {
+  await db.appSettings.where('key').anyOf('activeSession', 'currentRole').delete();
+}
 
 export function PocketBaseProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<AuthUser | null>(() => toAuthUser(pb.authStore.record));
+  const [isLoading, setIsLoading] = useState(true);
 
-  const switchRoleDirect = useCallback(async (roleId: string) => {
-    const ROLES = [
-      { id: 'lead_pastor', label: 'LEAD PASTOR', name: 'Pastor David', isAdmin: true, avatarText: 'PD' },
-      { id: 'administrator', label: 'ADMINISTRATOR', name: 'Sarah Jenkins', isAdmin: true, avatarText: 'SJ' },
-      { id: 'cell_leader', label: 'CELL LEADER', name: 'Michael Sterns', isAdmin: false, avatarText: 'MS' },
-      { id: 'member', label: 'CHURCH SAINT', name: 'Sister Clara Oswald', isAdmin: false, avatarText: 'CO' }
-    ];
-    const selected = ROLES.find(r => r.id === roleId);
-    if (selected) {
-      await putAppSetting('currentRole', selected);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        try {
-          navigator.vibrate(10);
-        } catch (e) {}
+  useEffect(() => {
+    const unsubscribe = pb.authStore.onChange((_token, record) => {
+      setUser(toAuthUser(record));
+    }, true);
+
+    async function restoreSession() {
+      if (!isPocketBaseConfigured) {
+        pb.authStore.clear();
+        setIsLoading(false);
+        return;
       }
 
-      await db.auditLogs.add({
-        localId: Math.random().toString(36).substring(2, 9),
-        userId: selected.id,
-        userName: selected.name,
-        action: 'role_switch',
-        details: `Switched roles to: ${selected.label}`,
-        createdAt: new Date().toISOString()
-      });
-    }
-  }, []);
+      await clearLegacyIdentity();
 
-  // Load active session from localIndexedDB on mount
-  useEffect(() => {
-    async function loadSession() {
+      if (!pb.authStore.isValid) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
-        const session = await db.appSettings.where('key').equals('activeSession').first();
-        if (session && session.value) {
-          setUser(session.value);
-        } else {
-          // If no active session, look at currentRole and load corresponding initial user
-          const roleSetting = await db.appSettings.where('key').equals('currentRole').first();
-          if (roleSetting && roleSetting.value) {
-            const roleId = roleSetting.value.id;
-            const initialUser = getMockUserForRole(roleId);
-            setUser(initialUser);
-            await putAppSetting('activeSession', initialUser);
-          }
-        }
-      } catch (e) {
-        console.error('[PocketBase] Error loading auth session:', e);
+        await pb.collection('users').authRefresh();
+      } catch (error) {
+        console.warn('[Auth] Stored PocketBase session is no longer valid:', error);
+        pb.authStore.clear();
       } finally {
         setIsLoading(false);
       }
     }
-    loadSession();
+
+    void restoreSession();
+    return unsubscribe;
   }, []);
 
-  const getMockUserForRole = (roleId: string): AuthUser => {
-    switch (roleId) {
-      case 'lead_pastor':
-        return {
-          id: 'user-pastor-david',
-          email: 'pastor.david@churchconnect.com',
-          name: 'Pastor David',
-          role: 'lead_pastor',
-          avatarText: 'PD'
-        };
-      case 'administrator':
-        return {
-          id: 'user-admin-sarah',
-          email: 'sarah.admin@churchconnect.com',
-          name: 'Sarah Jenkins',
-          role: 'administrator',
-          avatarText: 'SJ'
-        };
-      case 'cell_leader':
-        return {
-          id: 'user-cell-leader-michael',
-          email: 'michael.hope@churchconnect.com',
-          name: 'Michael Sterns',
-          role: 'cell_leader',
-          avatarText: 'MS'
-        };
-      case 'member':
-      default:
-        return {
-          id: 'user-member-clara',
-          email: 'clara.saints@churchconnect.com',
-          name: 'Sister Clara Oswald',
-          role: 'member',
-          avatarText: 'CO'
-        };
+  const login = useCallback(async (email: string, password: string) => {
+    if (!isPocketBaseConfigured) {
+      throw new Error('PocketBase is not configured. Set VITE_PB_URL.');
     }
-  };
+    if (!email.trim() || !password) {
+      throw new Error('Email and password are required.');
+    }
 
-  const login = useCallback(async (email: string, password?: string) => {
     setIsLoading(true);
-    // Find matching role email or fallback
-    let matchedRoleId = 'member';
-    if (email.includes('pastor.david')) {
-      matchedRoleId = 'lead_pastor';
-    } else if (email.includes('sarah.admin') || email.includes('admin')) {
-      matchedRoleId = 'administrator';
-    } else if (email.includes('michael.hope') || email.includes('leader')) {
-      matchedRoleId = 'cell_leader';
-    } else if (email.includes('clara.saints') || email.includes('clara')) {
-      matchedRoleId = 'member';
+    try {
+      const authData = await pb.collection('users').authWithPassword(email.trim(), password);
+      const authUser = toAuthUser(authData.record);
+      if (!authUser) throw new Error('PocketBase returned an invalid user record.');
+
+      await clearLegacyIdentity();
+      await writeLocalAudit(authUser, 'user_login', `${authUser.name} authenticated with PocketBase`);
+      setUser(authUser);
+      return authUser;
+    } finally {
+      setIsLoading(false);
     }
-
-    const authUser = getMockUserForRole(matchedRoleId);
-    
-    // Set active session & current role
-    await putAppSetting('activeSession', authUser);
-    await switchRoleDirect(matchedRoleId);
-    
-    setUser(authUser);
-    setIsLoading(false);
-
-    // Track login audit
-    await db.auditLogs.add({
-      localId: Math.random().toString(36).substring(2, 9),
-      userId: authUser.id,
-      userName: authUser.name,
-      action: 'user_login',
-      details: `${authUser.name} logged in successfully via PocketBase`,
-      createdAt: new Date().toISOString()
-    });
-
-    return authUser;
-  }, [switchRoleDirect]);
+  }, []);
 
   const logout = useCallback(async () => {
     setIsLoading(true);
-    if (user) {
-      await db.auditLogs.add({
-        localId: Math.random().toString(36).substring(2, 9),
-        userId: user.id,
-        userName: user.name,
-        action: 'user_logout',
-        details: `${user.name} logged out`,
-        createdAt: new Date().toISOString()
-      });
+    try {
+      if (user) {
+        await writeLocalAudit(user, 'user_logout', `${user.name} logged out`);
+      }
+      pb.authStore.clear();
+      await clearLegacyIdentity();
+      setUser(null);
+    } finally {
+      setIsLoading(false);
     }
-    await db.appSettings.where('key').equals('activeSession').delete();
-    setUser(null);
-    setIsLoading(false);
   }, [user]);
 
   const updateUserBadge = useCallback((count: number) => {
     if ('setAppBadge' in navigator) {
-      (navigator as any).setAppBadge(count).catch(console.error);
+      (navigator as Navigator & { setAppBadge: (value: number) => Promise<void> })
+        .setAppBadge(count)
+        .catch(console.error);
     }
   }, []);
 
   return (
-    <PocketBaseContext.Provider value={{ pb: mockPBClient, user, isLoading, login, logout, updateUserBadge }}>
+    <PocketBaseContext.Provider
+      value={{ pb, user, isLoading, isConfigured: isPocketBaseConfigured, login, logout, updateUserBadge }}
+    >
       {children}
     </PocketBaseContext.Provider>
   );

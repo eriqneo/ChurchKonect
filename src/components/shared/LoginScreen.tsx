@@ -5,14 +5,12 @@ import { useTheme } from '../../lib/theme/ThemeProvider';
 import { 
   KeyRound, 
   Mail, 
-  Sparkles, 
   Heart, 
   ArrowRight, 
   Eye, 
   EyeOff, 
   ShieldAlert,
   HelpCircle,
-  Smartphone
 } from 'lucide-react';
 import { useToast } from './toast/useToast';
 import { GlassCard } from './index';
@@ -26,7 +24,6 @@ export function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'email' | 'phone'>('email');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,18 +38,6 @@ export function LoginScreen() {
       toast.success('Welcome back to ChurchConnect 🕊');
     } catch (err) {
       toast.error('Authentication failed. Check your credentials.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleQuickLogin = async (roleEmail: string, roleName: string) => {
-    setIsLoading(true);
-    try {
-      await login(roleEmail, 'password');
-      toast.success(`Logged in as ${roleName} ⚡`);
-    } catch (err) {
-      toast.error('Failed to log in');
     } finally {
       setIsLoading(false);
     }
@@ -119,51 +104,21 @@ export function LoginScreen() {
         >
           <GlassCard className="p-5 border border-white/5 dark:border-white/5 light:border-slate-200/80 shadow-2xl bg-[#12161a]/80 dark:bg-[#12161a]/80 light:bg-white/90 backdrop-blur-md space-y-4">
             
-            {/* Login Tab selector */}
-            <div className="grid grid-cols-2 p-1 bg-black/20 dark:bg-black/20 light:bg-slate-100 rounded-lg">
-              <button
-                type="button"
-                onClick={() => { setActiveTab('email'); setEmail(''); }}
-                className={`py-1.5 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer ${
-                  activeTab === 'email'
-                    ? 'bg-gold-500 text-black shadow-sm'
-                    : 'text-text-secondary hover:text-white dark:hover:text-white light:hover:text-slate-900'
-                }`}
-              >
-                Email Portal
-              </button>
-              <button
-                type="button"
-                onClick={() => { setActiveTab('phone'); setEmail(''); }}
-                className={`py-1.5 text-[10px] font-black uppercase tracking-wider rounded-md transition-all cursor-pointer ${
-                  activeTab === 'phone'
-                    ? 'bg-gold-500 text-black shadow-sm'
-                    : 'text-text-secondary hover:text-white dark:hover:text-white light:hover:text-slate-900'
-                }`}
-              >
-                Phone Pass
-              </button>
-            </div>
-
             <form onSubmit={handleLogin} className="space-y-4">
               
               {/* Login Input */}
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black uppercase tracking-widest text-text-secondary dark:text-text-secondary light:text-slate-600 block">
-                  {activeTab === 'email' ? 'Clergy / Member Email' : 'Mobile Phone Number'}
+                  Clergy / Member Email
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-text-muted">
-                    {activeTab === 'email' ? (
-                      <Mail className="w-4 h-4" />
-                    ) : (
-                      <Smartphone className="w-4 h-4" />
-                    )}
+                    <Mail className="w-4 h-4" />
                   </div>
                   <input
-                    type={activeTab === 'email' ? 'email' : 'tel'}
+                    type="email"
                     required
-                    placeholder={activeTab === 'email' ? 'yourname@churchconnect.com' : '+1 (555) 000-0000'}
+                    placeholder="yourname@churchconnect.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 bg-black/20 dark:bg-black/20 light:bg-slate-100 border border-white/5 dark:border-white/5 light:border-slate-200 rounded-xl text-xs font-semibold text-white dark:text-white light:text-slate-900 focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 transition-colors placeholder-text-muted"
@@ -180,7 +135,7 @@ export function LoginScreen() {
                   <button
                     type="button"
                     onClick={() => {
-                      toast.info('Credential Recovery: Please contact your administrator Sarah Jenkins to retrieve or reset passwords.');
+                      toast.info('Password recovery will be enabled after mail delivery is configured. Please contact your church administrator.');
                     }}
                     className="text-[10px] font-black text-gold-500/80 dark:text-gold-500/80 light:text-gold-600 hover:underline cursor-pointer"
                   >
@@ -227,82 +182,10 @@ export function LoginScreen() {
           </GlassCard>
         </motion.div>
 
-        {/* QUICK SIMULATOR LOGINS FOR CONVENIENT USER EVALUATION */}
-        <motion.div
-          initial={{ y: 30, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 220, damping: 20, delay: 0.35 }}
-          className="space-y-2.5"
-        >
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-black uppercase tracking-wider text-text-secondary dark:text-text-secondary light:text-slate-600 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-gold-500" />
-              <span>Developer Test Logins</span>
-            </span>
-            <span className="text-[9px] text-text-muted font-bold font-mono">
-              Auto-fill bypass
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              {
-                role: 'LEAD PASTOR',
-                name: 'Pastor David',
-                email: 'pastor.david@churchconnect.com',
-                color: 'border-l-gold-500',
-                desc: 'Full Global Access'
-              },
-              {
-                role: 'ADMINISTRATOR',
-                name: 'Sarah Jenkins',
-                email: 'sarah.admin@churchconnect.com',
-                color: 'border-l-blue-500',
-                desc: 'Enrollment & CMS'
-              },
-              {
-                role: 'CELL LEADER',
-                name: 'Michael Sterns',
-                email: 'michael.hope@churchconnect.com',
-                color: 'border-l-sage-500',
-                desc: 'Attendance & Reports'
-              },
-              {
-                role: 'CHURCH SAINT',
-                name: 'Clara Oswald',
-                email: 'clara.saints@churchconnect.com',
-                color: 'border-l-cathedral-500',
-                desc: 'Announcements & Pass'
-              }
-            ].map((item) => (
-              <button
-                key={item.role}
-                onClick={() => handleQuickLogin(item.email, item.name)}
-                className={`p-2.5 rounded-xl border border-white/5 dark:border-white/5 light:border-slate-200 text-left bg-surface-200/40 dark:bg-surface-200/40 light:bg-white hover:bg-white/10 dark:hover:bg-white/10 light:hover:bg-slate-50 transition-all cursor-pointer flex flex-col justify-between border-l-3 ${item.color}`}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-[8px] font-black text-gold-500 dark:text-gold-500 light:text-gold-600 tracking-wider">
-                    {item.role}
-                  </span>
-                  <span className="text-[7px] text-text-muted font-mono whitespace-nowrap">
-                    {item.desc}
-                  </span>
-                </div>
-                <span className="text-[10px] font-black text-white dark:text-white light:text-slate-900 mt-1 truncate">
-                  {item.name}
-                </span>
-                <span className="text-[8px] text-text-muted truncate">
-                  {item.email}
-                </span>
-              </button>
-            ))}
-          </div>
-        </motion.div>
-
         {/* Bottom Security / Copyright Banner */}
         <div className="text-center">
           <p className="text-[9px] text-text-muted dark:text-text-muted light:text-slate-500">
-            🔒 Fully encrypted end-to-end Local indexed ledger.
+            🔒 Authentication secured by ChurchConnect PocketBase.
           </p>
           <p className="text-[8px] text-text-muted/70 mt-1">
             ChurchConnect PWA v2.0 • Secured under Discipleship Protocol.
