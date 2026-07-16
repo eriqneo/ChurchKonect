@@ -1,0 +1,18 @@
+{
+  "name": "ChurchConnect",
+  "short_name": "ChurchConnect",
+  "description": "Church administration & fellowship coordination",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0C0C0E",
+  "theme_color": "#C8A45C",
+  "icons": [
+    { "src": "/churchconnect-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "categories": ["lifestyle", "productivity"],
+  "shortcuts": [
+    { "name": "Send Prayer", "url": "/prayers/new" },
+    { "name": "My QR Code", "url": "/profile/qr" }
+  ]
+}

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
+  <title id="title">ChurchConnect</title>
+  <desc id="description">A gold cross on a cathedral burgundy rounded square.</desc>
+  <defs>
+    <linearGradient id="cathedral" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9B2A42"/>
+      <stop offset="0.55" stop-color="#7B1D31"/>
+      <stop offset="1" stop-color="#3D0E18"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="23" y1="16" x2="42" y2="49" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F2D99F"/>
+      <stop offset="0.48" stop-color="#E8C06A"/>
+      <stop offset="1" stop-color="#C8A45C"/>
+    </linearGradient>
+    <filter id="goldGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.8" result="blur"/>
+      <feColorMatrix in="blur" values="1 0 0 0 0.784  0 1 0 0 0.643  0 0 1 0 0.361  0 0 0 .45 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#cathedral)"/>
+  <rect x="3" y="3" width="58" height="58" rx="15" fill="none" stroke="#E8C06A" stroke-opacity=".24" stroke-width="2"/>
+  <path d="M32 15v34M22 27h20" fill="none" stroke="#C8A45C" stroke-opacity=".22" stroke-width="11" stroke-linecap="round" filter="url(#goldGlow)"/>
+  <path d="M32 15v34M22 27h20" fill="none" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M30.75 16.5v31" fill="none" stroke="#FDF8ED" stroke-opacity=".42" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,393 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+@import "tailwindcss";
+
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-theme-text: var(--text-primary);
+  --color-theme-text-secondary: var(--text-secondary);
+  --color-theme-text-muted: var(--text-muted);
+  --color-theme-bg: var(--bg-screen);
+  --color-theme-bg-secondary: var(--bg-screen-secondary);
+  --color-theme-card: var(--bg-card);
+  --color-theme-card-glass: var(--bg-card-glass);
+  --color-theme-border: var(--border-subtle);
+  --color-theme-accent: var(--accent-primary);
+  --color-theme-accent-gold: var(--accent-gold);
+
+  --color-cathedral-50: #FDF2F4;
+  --color-cathedral-100: #F9E0E5;
+  --color-cathedral-200: #F0BCC6;
+  --color-cathedral-300: #E48D9E;
+  --color-cathedral-400: #D45E76;
+  --color-cathedral-500: #B83A55;
+  --color-cathedral-600: #9B2A42;
+  --color-cathedral-700: #7B1D31;
+  --color-cathedral-800: #5E1525;
+  --color-cathedral-900: #3D0E18;
+  --color-cathedral-950: #1E0710;
+
+  --color-surface-0: var(--surface-0);
+  --color-surface-50: var(--surface-50);
+  --color-surface-100: var(--surface-100);
+  --color-surface-200: var(--surface-200);
+  --color-surface-300: var(--surface-300);
+  --color-surface-400: var(--surface-400);
+  --color-surface-light: #FAF7F2;
+  --color-surface-light-card: #FFFFFF;
+  --color-surface-light-secondary: #F3EDE4;
+
+  --color-gold-50: #FDF8ED;
+  --color-gold-100: #F9EDCF;
+  --color-gold-200: #F2D99F;
+  --color-gold-300: #E8C06A;
+  --color-gold-400: #D4A84A;
+  --color-gold-500: #C8A45C;
+  --color-gold-600: #A88434;
+  --color-gold-700: #8A6A24;
+  --color-gold-800: #6B5019;
+  --color-gold-900: #4A3810;
+  --color-gold-glow: rgba(200, 164, 92, 0.3);
+
+  --color-sage-400: #7BC47F;
+  --color-sage-500: #5BA85F;
+  --color-sage-600: #478A4B;
+
+  --color-semantic-success: #5BA85F;
+  --color-semantic-warning: #D4A84A;
+  --color-semantic-error: #D45E76;
+  --color-semantic-info: #5E9ECF;
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-light-primary: #1A1A1E;
+  --color-text-light-secondary: #6A6A74;
+  --color-text-light-muted: #9A9AA2;
+
+  --shadow-glow-gold: 0 0 20px rgba(200, 164, 92, 0.25), 0 0 60px rgba(200, 164, 92, 0.1);
+  --shadow-glow-cathedral: 0 0 30px rgba(123, 29, 49, 0.3);
+  --shadow-card-dark: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-card-light: 0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
+  --shadow-sheet: 0 -4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-tab-glow: 0 -4px 16px rgba(200, 164, 92, 0.35);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  --radius-card: 16px;
+  --radius-card-lg: 20px;
+  --radius-button: 12px;
+  --radius-pill: 9999px;
+  --radius-sheet: 24px;
+  --radius-input: 14px;
+
+  --blur-glass: 16px;
+  --blur-glass-heavy: 24px;
+}
+
+:root, html.light {
+  /* Theme specific variables */
+  --text-primary: #1A1A1E;
+  --text-secondary: #6A6A74;
+  --text-muted: #9A9AA4;
+  --bg-screen: #FAF7F2;
+  --bg-screen-secondary: #F3EDE4;
+  --bg-card: #FFFFFF;
+  --bg-card-glass: rgba(255, 255, 255, 0.7);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --accent-primary: #7B1D31;
+  --accent-gold: #A88434;
+
+  --surface-0: #FAF7F2;
+  --surface-50: #FFFFFF;
+  --surface-100: #FFFFFF;
+  --surface-200: #F3EDE4;
+  --surface-300: #E6DFD5;
+  --surface-400: #DACFBF;
+
+  /* Radial gradient glow Custom Properties */
+  --glow-dark: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(123,29,49,0.25) 0%, transparent 70%);
+  --glow-light: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(200,164,92,0.08) 0%, transparent 70%);
+
+  /* Safe Area variables for notched devices */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+.dark, html.dark {
+  --text-primary: #E8E8EA;
+  --text-secondary: #8A8A92;
+  --text-muted: #5A5A64;
+  --bg-screen: #0C0C0E;
+  --bg-screen-secondary: #121214;
+  --bg-card: #1A1A1E;
+  --bg-card-glass: rgba(255, 255, 255, 0.04);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --accent-primary: #C8A45C;
+  --accent-gold: #C8A45C;
+
+  --surface-0: #0C0C0E;
+  --surface-50: #121214;
+  --surface-100: #1A1A1E;
+  --surface-200: #242428;
+  --surface-300: #2E2E34;
+  --surface-400: #3A3A42;
+}
+
+/* Base Body and typography defaults */
+html, body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1), color 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Headings are Bold */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+/* Body defaults */
+p, span, div, li, input, textarea, select {
+  font-weight: 500; /* Medium for body */
+}
+
+/* Small elements and captions are Regular */
+caption, figcaption, .caption {
+  font-weight: 400; /* Regular for captions */
+}
+
+/* Theme configurations */
+html.dark {
+  background-color: #0C0C0E;
+  color: #E8E8EA;
+}
+
+html.light {
+  background-color: #FAF7F2;
+  color: #1A1A1E;
+}
+
+/* Radial Glow Containers */
+.header-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40vh;
+  pointer-events: none;
+  z-index: 0;
+  transition: background 300ms ease;
+}
+
+html.dark .header-glow {
+  background: var(--glow-dark);
+}
+
+html.light .header-glow {
+  background: var(--glow-light);
+}
+
+/* Premium Glassmorphism Cards */
+.glass-card {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: background-color 300ms, border-color 300ms, box-shadow 300ms;
+}
+
+html.dark .glass-card {
+  background: rgba(26, 26, 30, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+html.light .glass-card {
+  background: #FFFFFF;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #242428;
+  border-radius: 9999px;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #E3DDD5;
+  border-radius: 9999px;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #2E2E34;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #D4CDBF;
+}
+
+/* Safe areas classes */
+.pt-safe {
+  padding-top: max(1rem, var(--safe-top));
+}
+.pb-safe {
+  padding-bottom: max(1rem, var(--safe-bottom));
+}
+.pl-safe {
+  padding-left: max(1rem, var(--safe-left));
+}
+.pr-safe {
+  padding-right: max(1rem, var(--safe-right));
+}
+
+/* ==========================================
+   ChurchConnect Custom Animation System
+   ========================================== */
+
+@keyframes pulse-gold {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(200,164,92,0.2); }
+  50% { box-shadow: 0 0 30px rgba(200,164,92,0.4); }
+}
+
+@keyframes ripple-gold {
+  0% { transform: scale(0); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+@keyframes float-gentle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes spin-sync {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes draw-check {
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.animate-pulse-gold {
+  animation: pulse-gold 2s infinite ease-in-out;
+}
+
+.animate-skeleton-shimmer {
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 2.5s infinite ease-in-out;
+}
+
+.animate-ripple-gold {
+  animation: ripple-gold 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.animate-float-gentle {
+  animation: float-gentle 4s infinite ease-in-out;
+}
+
+.animate-spin-sync {
+  animation: spin-sync 1.2s linear infinite;
+}
+
+.animate-draw-check {
+  animation: draw-check 0.4s ease-out forwards;
+}
+
+.shimmer-base {
+  background: linear-gradient(90deg, var(--color-surface-200) 25%, var(--color-surface-300) 50%, var(--color-surface-200) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+html.light .shimmer-base {
+  background: linear-gradient(90deg, var(--color-surface-light-secondary) 25%, #EFE8DC 50%, var(--color-surface-light-secondary) 75%);
+  background-size: 200% 100%;
+}
+
+/* ==========================================
+   Robust Theme-Aware Color Helper Overrides
+   ========================================== */
+
+/* Text colors */
+.text-text-primary, .text-theme-text {
+  color: var(--text-primary) !important;
+}
+.text-text-secondary, .text-theme-text-secondary {
+  color: var(--text-secondary) !important;
+}
+.text-text-muted, .text-theme-text-muted {
+  color: var(--text-muted) !important;
+}
+
+/* Backgrounds & borders */
+.bg-theme-bg {
+  background-color: var(--bg-screen) !important;
+}
+.bg-theme-bg-secondary {
+  background-color: var(--bg-screen-secondary) !important;
+}
+.bg-theme-card {
+  background-color: var(--bg-card) !important;
+}
+.bg-theme-card-glass {
+  background-color: var(--bg-card-glass) !important;
+}
+.border-theme-border {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Surface backgrounds */
+.bg-surface-0 {
+  background-color: var(--surface-0) !important;
+}
+.bg-surface-50 {
+  background-color: var(--surface-50) !important;
+}
+.bg-surface-100 {
+  background-color: var(--surface-100) !important;
+}
+.bg-surface-200 {
+  background-color: var(--surface-200) !important;
+}
+.bg-surface-300 {
+  background-color: var(--surface-300) !important;
+}
+.bg-surface-400 {
+  background-color: var(--surface-400) !important;
+}
+
+
+
