@@ -70,12 +70,29 @@ export interface CellMeetingRecord extends LocalFirstRecord {
   cellGroupId: string;
   meetingDate: string;     // YYYY-MM-DD
   status: 'scheduled' | 'active' | 'completed';
+  startedAt?: string;
+  endedAt?: string;
+  createdBy?: string;
+  operationId?: string;
 }
 
 export interface CellAttendanceRecord extends LocalFirstRecord {
   meetingId: string;
-  memberId: string;
+  memberId?: string;
+  visitorId?: string;
   status: 'present' | 'absent' | 'excused';
+  markedBy?: string;
+  operationId?: string;
+}
+
+export interface CellVisitorRecord extends LocalFirstRecord {
+  meetingId: string;
+  cellGroupId: string;
+  fullName: string;
+  phone?: string;
+  followUpStatus: 'new' | 'contacted' | 'connected';
+  createdBy?: string;
+  operationId?: string;
 }
 
 export interface CellReportRecord extends LocalFirstRecord {
@@ -85,7 +102,38 @@ export interface CellReportRecord extends LocalFirstRecord {
   challenges: string;
   reportStatus: 'pending_review' | 'approved' | 'rejected';
   submittedBy: string;
+  submittedById?: string;
   attendanceCount: number;
+  excusedCount?: number;
+  absentCount?: number;
+  visitorCount?: number;
+  submittedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+  operationId?: string;
+}
+
+export type CellOperationCommand =
+  | 'start_meeting'
+  | 'mark_attendance'
+  | 'add_visitor'
+  | 'submit_report'
+  | 'review_report';
+
+export interface OutboxRecord {
+  id?: number;
+  operationId: string;
+  ownerId: string;
+  command: CellOperationCommand;
+  entityId: string;
+  payload: Record<string, unknown>;
+  status: 'pending' | 'processing' | 'failed';
+  attempts: number;
+  lastError?: string;
+  nextAttemptAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TrainingRecord extends LocalFirstRecord {
@@ -193,7 +241,9 @@ export class ChurchConnectDB extends Dexie {
   cellGroups!: Table<CellGroupRecord, number>;
   cellMeetings!: Table<CellMeetingRecord, number>;
   cellAttendance!: Table<CellAttendanceRecord, number>;
+  cellVisitors!: Table<CellVisitorRecord, number>;
   cellReports!: Table<CellReportRecord, number>;
+  outbox!: Table<OutboxRecord, number>;
   trainings!: Table<TrainingRecord, number>;
   trainingSessions!: Table<TrainingSessionRecord, number>;
   trainingEnrollments!: Table<TrainingEnrollmentRecord, number>;
@@ -231,6 +281,14 @@ export class ChurchConnectDB extends Dexie {
       feedback: '++id, localId, memberId, type, syncStatus',
       appSettings: '++id, &key'
     });
+
+    this.version(2).stores({
+      cellMeetings: '++id, localId, remoteId, cellGroupId, meetingDate, status, syncStatus, cacheOwnerId',
+      cellAttendance: '++id, localId, remoteId, meetingId, memberId, visitorId, status, syncStatus, cacheOwnerId',
+      cellVisitors: '++id, &localId, remoteId, meetingId, cellGroupId, fullName, followUpStatus, syncStatus, cacheOwnerId',
+      cellReports: '++id, localId, remoteId, meetingId, cellGroupId, reportStatus, syncStatus, cacheOwnerId',
+      outbox: '++id, &operationId, ownerId, command, entityId, status, nextAttemptAt, createdAt'
+    });
   }
 }
 
@@ -245,6 +303,18 @@ export function generateUUID(): string {
     return crypto.randomUUID();
   }
   return 'local_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now().toString(36);
+}
+
+/** PocketBase custom record ids must be exactly 15 lowercase alphanumeric characters. */
+export function generatePocketBaseId(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = new Uint8Array(15);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join('');
 }
 
 export function createLocalRecord<T extends LocalFirstRecord>(fields: Omit<T, keyof LocalFirstRecord>): T {

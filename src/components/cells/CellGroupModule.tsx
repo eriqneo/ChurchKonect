@@ -3,17 +3,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as Typography from '../../lib/theme/typography';
 import { 
   db, 
-  generateUUID, 
-  createLocalRecord,
-  type MemberRecord,
-  type CellMeetingRecord,
-  type CellAttendanceRecord,
-  type CellReportRecord,
-  type NotificationRecord
+  generateUUID
 } from '../../lib/db/churchConnectDB';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { syncEngine } from '../../lib/db/SyncEngine';
 import { useCurrentUser } from '../../lib/db/hooks';
+import { useCellOperations } from '../../lib/db/cellOperations';
 import {
   GlassCard,
   AccentBadge,
@@ -92,6 +85,20 @@ export function CellGroupModule() {
     isRefreshing: structureRefreshing,
     error: structureError
   } = useChurchStructure();
+  const {
+    meetings: cellMeetings,
+    attendance: cellAttendances,
+    visitors: cellVisitors,
+    reports: cellReports,
+    pendingCount: operationsPendingCount,
+    failedCount: operationsFailedCount,
+    error: operationsError,
+    startMeeting,
+    markAttendance,
+    addVisitor,
+    submitReport,
+    reviewReport
+  } = useCellOperations();
 
   // 1. Role View Emulator Mode: 'admin' | 'leader' | 'pastor'
   const [currentRoleView, setCurrentRoleView] = useState<'admin' | 'leader' | 'pastor'>('leader');
@@ -109,43 +116,6 @@ export function CellGroupModule() {
       }
     }
   }, [roleId]);
-
-  // --------------------------------------
-  // Live Database Queries via useLiveQuery
-  // --------------------------------------
-  const localVisitors = useLiveQuery(async () => db.members
-    .filter((member) => !member.remoteId && member.role === 'visitor' && member.deletedAt === undefined)
-    .toArray()) || [];
-
-  const cellMeetings = useLiveQuery(async () => {
-    const raw = await db.cellMeetings.toArray();
-    const seen = new Set<string>();
-    return raw.filter(m => {
-      if (!m.localId || seen.has(m.localId)) return false;
-      seen.add(m.localId);
-      return true;
-    });
-  }) || [];
-
-  const cellAttendances = useLiveQuery(async () => {
-    const raw = await db.cellAttendance.toArray();
-    const seen = new Set<string>();
-    return raw.filter(a => {
-      if (!a.localId || seen.has(a.localId)) return false;
-      seen.add(a.localId);
-      return true;
-    });
-  }) || [];
-
-  const cellReports = useLiveQuery(async () => {
-    const raw = await db.cellReports.toArray();
-    const seen = new Set<string>();
-    return raw.filter(r => {
-      if (!r.localId || seen.has(r.localId)) return false;
-      seen.add(r.localId);
-      return true;
-    });
-  }) || [];
 
   // Local state for notifications or audits triggers
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -440,6 +410,7 @@ export function CellGroupModule() {
   // ----------------------------------------------------------------------
   const [leaderCellGroupId, setLeaderCellGroupId] = useState<string>('');
   const canOperateMeeting = roleId === 'cell_leader' || (isRoleSimulatorEnabled && currentRoleView === 'leader');
+  const canReviewReports = roleId === 'lead_pastor' || roleId === 'administrator' || (isRoleSimulatorEnabled && currentRoleView === 'pastor');
 
   // Auto-select cell group for leader
   useEffect(() => {
@@ -470,11 +441,22 @@ export function CellGroupModule() {
 
   // Roster of members pre-registered to this group
   const cellGroupRoster = useMemo(() => {
+    const meetingVisitors = activeMeeting
+      ? cellVisitors.filter((visitor) => visitor.meetingId === activeMeeting.localId).map((visitor) => ({
+          localId: visitor.localId,
+          remoteId: visitor.remoteId || visitor.localId,
+          fullName: visitor.fullName,
+          phone: visitor.phone || '',
+          role: 'visitor',
+          avatarText: visitor.fullName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
+          cellGroupId: visitor.cellGroupId
+        }))
+      : [];
     return [
       ...allMembers.filter(m => m.cellGroupId === leaderCellGroupId),
-      ...localVisitors.filter(m => m.cellGroupId === leaderCellGroupId)
+      ...meetingVisitors
     ];
-  }, [allMembers, leaderCellGroupId, localVisitors]);
+  }, [activeMeeting, allMembers, cellVisitors, leaderCellGroupId]);
 
   // Meeting Timer State
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -484,7 +466,11 @@ export function CellGroupModule() {
     if (activeMeeting) {
       const fetchStartTime = async () => {
         const timerSetting = await db.appSettings.where('key').equals(`meeting_timer_${activeMeeting.localId}`).first();
-        const startTime = timerSetting ? timerSetting.value : Date.now();
+        const startTime = timerSetting
+          ? timerSetting.value
+          : activeMeeting.startedAt
+            ? new Date(activeMeeting.startedAt).getTime()
+            : Date.now();
         
         const updateTimer = () => {
           const secs = Math.floor((Date.now() - startTime) / 1000);
@@ -514,49 +500,27 @@ export function CellGroupModule() {
       return;
     }
     triggerHaptic(20);
-    const dateStr = new Date().toISOString().split('T')[0];
-
-    // Create meeting record
-    const newMeeting = createLocalRecord<CellMeetingRecord>({
-      cellGroupId: leaderCellGroupId,
-      meetingDate: dateStr,
-      status: 'active'
-    });
-    await db.cellMeetings.add(newMeeting);
-
-    // Auto-prepopulate attendance: default to 'absent' (which represents unmarked)
-    const attendanceRecords = cellGroupRoster.map(m => createLocalRecord<CellAttendanceRecord>({
-      meetingId: newMeeting.localId,
-      memberId: m.localId,
-      status: 'absent'
-    }));
-
-    if (attendanceRecords.length > 0) {
-      await db.cellAttendance.bulkAdd(attendanceRecords);
-    }
-
-    // Save timer start time
-    await db.appSettings.put({ key: `meeting_timer_${newMeeting.localId}`, value: Date.now() });
-
-    showToast(`Fellowship meeting started for ${currentLeaderCell?.name}!`);
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+    try {
+      await startMeeting(leaderCellGroupId, allMembers.filter((member) => member.cellGroupId === leaderCellGroupId).map((member) => member.localId));
+      showToast(typeof navigator !== 'undefined' && !navigator.onLine
+        ? `Meeting started for ${currentLeaderCell?.name}. Saved on this device.`
+        : `Fellowship meeting started for ${currentLeaderCell?.name}!`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not start the meeting.');
     }
   };
 
   // Cycling the attendance status loop
-  const handleCycleAttendance = async (memberLocalId: string) => {
+  const handleCycleAttendance = async (personLocalId: string, isVisitor = false) => {
     if (!activeMeeting) {
       showToast('Please start the fellowship meeting first.');
       return;
     }
     triggerHaptic(15);
 
-    const existing = await db.cellAttendance
-      .where('meetingId')
-      .equals(activeMeeting.localId)
-      .filter(att => att.memberId === memberLocalId)
-      .first();
+    const existing = cellAttendances.find((attendance) => attendance.meetingId === activeMeeting.localId && (
+      isVisitor ? attendance.visitorId === personLocalId : attendance.memberId === personLocalId
+    ));
 
     let nextStatus: 'present' | 'absent' | 'excused' = 'absent';
     if (!existing || existing.status === 'absent') {
@@ -567,23 +531,10 @@ export function CellGroupModule() {
       nextStatus = 'absent';
     }
 
-    if (existing && existing.id) {
-      await db.cellAttendance.update(existing.id, {
-        status: nextStatus,
-        syncStatus: 'pending',
-        updatedAt: new Date().toISOString()
-      });
-    } else {
-      const newAtt = createLocalRecord<CellAttendanceRecord>({
-        meetingId: activeMeeting.localId,
-        memberId: memberLocalId,
-        status: nextStatus
-      });
-      await db.cellAttendance.add(newAtt);
-    }
-
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+    try {
+      await markAttendance(activeMeeting.localId, isVisitor ? { visitorId: personLocalId } : { memberId: personLocalId }, nextStatus);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not save attendance.');
     }
   };
 
@@ -597,7 +548,7 @@ export function CellGroupModule() {
     let absent = 0;
 
     cellGroupRoster.forEach(m => {
-      const rec = activeAtts.find(a => a.memberId === m.localId);
+      const rec = activeAtts.find(a => m.role === 'visitor' ? a.visitorId === m.localId : a.memberId === m.localId);
       if (rec?.status === 'present') present++;
       else if (rec?.status === 'excused') excused++;
       else absent++;
@@ -624,36 +575,16 @@ export function CellGroupModule() {
     }
     triggerHaptic(15);
 
-    const visitorId = generateUUID();
-    const avatarText = visitorName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-
-    // Create visitor as temporary member in DB
-    const newVisitor: MemberRecord = createLocalRecord<MemberRecord>({
-      fullName: visitorName,
-      email: `${visitorName.toLowerCase().replace(/\s+/g, '')}@visitor.com`,
-      phone: visitorPhone || '+1 (555) 019-9000',
-      role: 'visitor',
-      cellGroupId: leaderCellGroupId,
-      qrCode: `VISITOR_${visitorName.replace(/\s+/g, '_').toUpperCase()}`,
-      avatarText
-    });
-    await db.members.add(newVisitor);
-
-    // Record attendance: automatically marked present
-    const newAtt = createLocalRecord<CellAttendanceRecord>({
-      meetingId: activeMeeting.localId,
-      memberId: newVisitor.localId,
-      status: 'present'
-    });
-    await db.cellAttendance.add(newAtt);
-
-    setVisitorName('');
-    setVisitorPhone('');
-    setIsAddingVisitor(false);
-    showToast(`Visitor "${newVisitor.fullName}" added and marked Present!`);
-
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+    try {
+      const newVisitor = await addVisitor(activeMeeting.localId, leaderCellGroupId, visitorName, visitorPhone);
+      setVisitorName('');
+      setVisitorPhone('');
+      setIsAddingVisitor(false);
+      showToast(typeof navigator !== 'undefined' && !navigator.onLine
+        ? `Visitor "${newVisitor.fullName}" saved on this device and marked present.`
+        : `Visitor "${newVisitor.fullName}" added and marked present!`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not add the visitor.');
     }
   };
 
@@ -681,54 +612,20 @@ export function CellGroupModule() {
     }
     triggerHaptic(35);
 
-    const nowStr = new Date().toISOString();
-
-    // Create Report Record
-    const newReport = createLocalRecord<CellReportRecord>({
-      meetingId: activeMeeting.localId,
-      cellGroupId: leaderCellGroupId,
-      highlights: highlightsText,
-      challenges: challengesText || 'No challenges escalated today.',
-      reportStatus: 'pending_review',
-      submittedBy: user.name,
-      attendanceCount: liveRollCount.present
-    });
-    await db.cellReports.add(newReport);
-
-    // End Fellowship meeting in DB
-    const dbMeeting = await db.cellMeetings.where('localId').equals(activeMeeting.localId).first();
-    if (dbMeeting && dbMeeting.id) {
-      await db.cellMeetings.update(dbMeeting.id, {
-        status: 'completed',
-        syncStatus: 'pending',
-        updatedAt: nowStr
+    try {
+      await submitReport({
+        meetingId: activeMeeting.localId,
+        cellGroupId: leaderCellGroupId,
+        highlights: highlightsText.trim(),
+        challenges: challengesText.trim(),
+        attendanceCount: liveRollCount.present,
+        excusedCount: liveRollCount.excused,
+        absentCount: liveRollCount.absent,
+        visitorCount: cellVisitors.filter((visitor) => visitor.meetingId === activeMeeting.localId).length
       });
-    }
-
-    // Clean up timer start time
-    await db.appSettings.where('key').equals(`meeting_timer_${activeMeeting.localId}`).delete();
-
-    // Create notification for Lead Pastor
-    await db.notifications.add({
-      localId: generateUUID(),
-      userId: 'user-pastor-david', // Lead Pastor ID
-      type: 'report',
-      title: 'New Fellowship Report',
-      message: `Cell report submitted by ${user.name} for ${currentLeaderCell?.name}.`,
-      isRead: false,
-      createdAt: nowStr
-    });
-
-    // Fire browser push notification if permitted
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-      new Notification('Cell Report Submitted', {
-        body: `Leader ${user.name} submitted attendance for ${currentLeaderCell?.name}.`
-      });
-    }
-
-    setSubmitSuccess(true);
-    if (syncEngine.isOnline()) {
-      syncEngine.syncNow().catch(console.error);
+      setSubmitSuccess(true);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not submit the report.');
     }
   };
 
@@ -752,28 +649,19 @@ export function CellGroupModule() {
 
   // Missing reports calculations (Delinquents)
   const delinquentCells = useMemo(() => {
-    // Find cells that do NOT have any meetings/reports in current week or list all cells with zero reports as a reminder
-    // For demonstration, let's list cells that have no active or completed meetings for today
-    const activeAndCompletedMeetings = cellMeetings.map(m => m.cellGroupId);
-    return cellGroups.filter(c => !activeAndCompletedMeetings.includes(c.localId));
-  }, [cellGroups, cellMeetings]);
+    const startOfWeek = new Date();
+    const day = startOfWeek.getDay();
+    startOfWeek.setDate(startOfWeek.getDate() - (day === 0 ? 6 : day - 1));
+    startOfWeek.setHours(0, 0, 0, 0);
+    const weekStart = `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, '0')}-${String(startOfWeek.getDate()).padStart(2, '0')}`;
+    const reportedCellIds = new Set(cellReports.filter((report) => (report.submittedAt || report.createdAt).slice(0, 10) >= weekStart).map((report) => report.cellGroupId));
+    return cellGroups.filter((cell) => cell.status !== 'Inactive' && !reportedCellIds.has(cell.localId));
+  }, [cellGroups, cellReports]);
 
   const handleSendReminder = async (cellGroup: PocketBaseCellGroup) => {
     triggerHaptic(20);
     const leaderName = cellGroup.leaderName || allMembers.find(m => m.userId === cellGroup.leaderId)?.fullName || 'Cell Leader';
-
-    // Create Notification in local DB for the leader
-    await db.notifications.add({
-      localId: generateUUID(),
-      userId: cellGroup.leaderId,
-      type: 'report',
-      title: 'Overdue Fellowship Report',
-      message: `Lead Pastor David requested you submit the Weekly Report for "${cellGroup.name}".`,
-      isRead: false,
-      createdAt: new Date().toISOString()
-    });
-
-    showToast(`Push reminder dispatched to cell leader ${leaderName}!`);
+    showToast(`Reminder delivery for ${leaderName} will be enabled with the Notifications backend module.`);
   };
 
   // Confetti Blast Effect on Report Approval
@@ -822,35 +710,11 @@ export function CellGroupModule() {
     triggerHaptic(30);
     handleConfettiBlast(event);
 
-    const nowStr = new Date().toISOString();
-    const reportRecord = await db.cellReports.where('localId').equals(reportLocalId).first();
-    if (reportRecord && reportRecord.id) {
-      // Update report status
-      await db.cellReports.update(reportRecord.id, {
-        reportStatus: 'approved',
-        syncStatus: 'pending',
-        updatedAt: nowStr
-      });
-
-      // Fetch group details to find leader
-      const groupRecord = await db.cellGroups.where('localId').equals(reportRecord.cellGroupId).first();
-      if (groupRecord) {
-        // Send notification to cell leader
-        await db.notifications.add({
-          localId: generateUUID(),
-          userId: groupRecord.leaderId,
-          type: 'report',
-          title: 'Report Approved ✓',
-          message: `Your Weekly Fellowship Report for "${groupRecord.name}" has been approved by Lead Pastor.`,
-          isRead: false,
-          createdAt: nowStr
-        });
-      }
-
+    try {
+      await reviewReport(reportLocalId, 'approved');
       showToast('Cell Group report approved successfully!');
-      if (syncEngine.isOnline()) {
-        syncEngine.syncNow().catch(console.error);
-      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not approve the report.');
     }
   };
 
@@ -954,6 +818,18 @@ export function CellGroupModule() {
           </button>
         </div>
       </div>}
+
+      {currentRoleView !== 'admin' && (operationsPendingCount > 0 || operationsFailedCount > 0 || operationsError) && (
+        <div className={`rounded-xl border px-3 py-2 text-[10px] font-semibold ${
+          operationsFailedCount > 0
+            ? 'border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-300'
+            : 'border-gold-500/20 bg-gold-500/5 text-text-secondary'
+        }`}>
+          {operationsFailedCount > 0
+            ? `${operationsFailedCount} change${operationsFailedCount === 1 ? '' : 's'} need attention. ${operationsError || 'Refresh after checking your access and record details.'}`
+            : operationsError || `${operationsPendingCount} change${operationsPendingCount === 1 ? '' : 's'} saved on this device and waiting to sync.`}
+        </div>
+      )}
 
 
       {/* ======================================================================
@@ -1626,7 +1502,9 @@ export function CellGroupModule() {
                 ) : (
                   cellGroupRoster.map((member) => {
                     const attRecord = activeMeeting
-                      ? cellAttendances.find(a => a.meetingId === activeMeeting.localId && a.memberId === member.localId)
+                      ? cellAttendances.find(a => a.meetingId === activeMeeting.localId && (
+                          member.role === 'visitor' ? a.visitorId === member.localId : a.memberId === member.localId
+                        ))
                       : null;
 
                     const isPresent = attRecord?.status === 'present';
@@ -1664,7 +1542,7 @@ export function CellGroupModule() {
                         {/* Three-State Toggle triggers */}
                         <button
                           id={`toggle-btn-${member.localId}`}
-                          onClick={() => handleCycleAttendance(member.localId)}
+                          onClick={() => handleCycleAttendance(member.localId, member.role === 'visitor')}
                           disabled={!canOperateMeeting}
                           className="w-11 h-11 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-[0.9] disabled:cursor-default"
                           title="Cycle through Present / Excused / Absent"
@@ -1890,10 +1768,12 @@ export function CellGroupModule() {
 
                     <div className="space-y-1">
                       <h3 className="text-base font-black text-gold-500">
-                        Report Dispatched!
+                        Report Saved
                       </h3>
                       <p className="text-xs text-text-secondary font-bold max-w-[250px] mx-auto leading-relaxed">
-                        Weekly report uploaded securely. Lead Pastor notified for review.
+                        {operationsPendingCount > 0
+                          ? 'Your weekly report is safe on this device and will sync automatically when the connection is available.'
+                          : 'Your weekly report is synchronized and ready for pastoral review.'}
                       </p>
                     </div>
 
@@ -1951,7 +1831,7 @@ export function CellGroupModule() {
                         onClick={() => handleSendReminder(c)}
                         className="px-2 py-0.5 bg-gold-500 text-black font-black text-[8px] rounded uppercase cursor-pointer"
                       >
-                        Send Reminder
+                        Reminder Setup
                       </button>
                     </div>
                   );
@@ -2061,8 +1941,8 @@ export function CellGroupModule() {
 
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         <AccentBadge
-                          label={isPending ? 'Pending' : 'Approved'}
-                          variant={isPending ? 'gold' : 'sage'}
+                          label={isPending ? 'Pending' : report.reportStatus === 'rejected' ? 'Rejected' : 'Approved'}
+                          variant={isPending ? 'gold' : report.reportStatus === 'rejected' ? 'cathedral' : 'sage'}
                           size="sm"
                         />
                         <div className="text-text-muted">
@@ -2092,8 +1972,10 @@ export function CellGroupModule() {
                                   <p className="text-[9px] text-text-muted italic col-span-2">No detailed roll call logs saved.</p>
                                 ) : (
                                   reportAttendances.map((att, idx) => {
-                                    const mRecord = allMembers.find(m => m.localId === att.memberId);
-                                    if (!mRecord) return null;
+                                    const memberRecord = allMembers.find(m => m.localId === att.memberId);
+                                    const visitorRecord = cellVisitors.find(visitor => visitor.localId === att.visitorId);
+                                    const displayName = memberRecord?.fullName || visitorRecord?.fullName;
+                                    if (!displayName) return null;
 
                                     return (
                                       <div key={idx} className="flex items-center gap-1.5 bg-white/[0.02] p-1.5 rounded-lg border border-white/5">
@@ -2105,7 +1987,7 @@ export function CellGroupModule() {
                                               : 'bg-white/10'
                                         }`} />
                                         <span className="text-[11px] text-text-primary truncate font-semibold">
-                                          {mRecord.fullName}
+                                          {displayName}
                                         </span>
                                       </div>
                                     );
@@ -2138,7 +2020,7 @@ export function CellGroupModule() {
                             )}
 
                             {/* Approve action */}
-                            {isPending && (
+                            {isPending && canReviewReports && (
                               <div className="pt-2">
                                 <button
                                   id={`approve-action-${report.localId}`}

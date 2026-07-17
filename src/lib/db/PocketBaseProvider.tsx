@@ -136,12 +136,16 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
       }
       pb.authStore.clear();
       await clearLegacyIdentity();
-      await db.transaction('rw', db.members, db.departments, db.sections, db.cellGroups, async () => {
+      await db.transaction('rw', [db.members, db.departments, db.sections, db.cellGroups, db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports], async () => {
         await Promise.all([
           db.members.filter((record) => Boolean(record.remoteId)).delete(),
           db.departments.filter((record) => Boolean(record.remoteId)).delete(),
           db.sections.filter((record) => Boolean(record.remoteId)).delete(),
-          db.cellGroups.filter((record) => Boolean(record.remoteId)).delete()
+          db.cellGroups.filter((record) => Boolean(record.remoteId)).delete(),
+          db.cellMeetings.filter((record) => record.syncStatus === 'synced').delete(),
+          db.cellAttendance.filter((record) => record.syncStatus === 'synced').delete(),
+          db.cellVisitors.filter((record) => record.syncStatus === 'synced').delete(),
+          db.cellReports.filter((record) => record.syncStatus === 'synced').delete()
         ]);
       });
       setUser(null);

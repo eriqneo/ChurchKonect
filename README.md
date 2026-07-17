@@ -3,9 +3,9 @@
 ChurchConnect is a mobile-first church administration PWA for members, cell groups, training,
 prayer coordination, announcements, and reporting.
 
-The frontend is currently a React/Vite application with Dexie-backed local persistence. The
-production PocketBase backend described in `POCKETHOST_MASTER_PLAN.md` has not yet been connected,
-so authentication and remote synchronization remain simulated in this frontend release.
+The frontend is a React/Vite application with Dexie-backed local persistence. PocketBase currently
+provides production authentication, the member registry, church/cell structures, and local-first
+cell operations. Remaining modules are being connected incrementally and tested before moving on.
 
 ## Local development
 
@@ -114,5 +114,24 @@ To reconcile cell-structure relations and run disposable role/security tests:
 npm run backend:bootstrap-cell-structure -- --email=YOUR_SUPERUSER_EMAIL
 ```
 
-Both commands prompt for the password without echoing or storing it. Cell meetings, attendance,
-visitors, and weekly reports are intentionally reserved for the following offline-outbox module.
+Both commands prompt for the password without echoing or storing it.
+
+## Cell meetings, attendance, visitors, and reports
+
+Fellowship operations are local-first: leaders can start a meeting, take attendance, add visitors,
+and submit the weekly report immediately, including during an outage. A durable, per-user Dexie
+outbox then sends idempotent commands to PocketBase in order. Server-confirmed results are cached
+for short outages; failed authorization or validation remains visible as “needs attention” instead
+of being falsely marked as synchronized.
+
+To reconcile the four operational collections and run disposable ownership, authorization,
+idempotency, report-review, and cleanup tests:
+
+```bash
+npm run backend:bootstrap-cell-operations -- --email=YOUR_SUPERUSER_EMAIL
+```
+
+If Node networking is restricted while `curl` can reach PocketHost, add `--transport=curl`. This is
+only a bootstrap transport fallback; the browser app continues to use PocketBase directly.
+
+The versioned schema is in `pb_migrations/202607171700_create_cell_operations.js`.
