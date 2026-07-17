@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import * as Typography from '../../lib/theme/typography';
 import { 
-  db, 
-  TrainingRecord, 
-  TrainingSessionRecord, 
-  TrainingEnrollmentRecord, 
-  TrainingAttendanceRecord, 
-  TrainingCertificateRecord, 
-  MemberRecord,
-  createLocalRecord 
+  type TrainingRecord,
+  type TrainingSessionRecord,
+  type TrainingCertificateRecord
 } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
+import { useTrainingData } from '../../lib/db/trainingData';
+import { type PocketBaseMember, usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
 import {
   GlassCard,
   AccentBadge,
@@ -197,13 +193,27 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
   const currentRole = passedRole || userRole;
   const [roleView, setRoleView] = useState<'admin' | 'member'>('member');
 
-  // Database Live Queries
-  const coursesRaw = useLiveQuery(() => db.trainings.toArray()) || [];
-  const enrollments = useLiveQuery(() => db.trainingEnrollments.toArray()) || [];
-  const sessionsRaw = useLiveQuery(() => db.trainingSessions.toArray()) || [];
-  const attendanceLogs = useLiveQuery(() => db.trainingAttendance.toArray()) || [];
-  const certificatesRaw = useLiveQuery(() => db.trainingCertificates.toArray()) || [];
-  const members = useLiveQuery(() => db.members.toArray()) || [];
+  const { members } = usePocketBaseMembers();
+  const {
+    courses: coursesRaw,
+    enrollments,
+    sessions: sessionsRaw,
+    attendance: attendanceLogs,
+    certificates: certificatesRaw,
+    isLoading: trainingLoading,
+    isRefreshing: trainingRefreshing,
+    pendingCount: trainingPendingCount,
+    failedCount: trainingFailedCount,
+    error: trainingError,
+    saveCourse,
+    enrollMember,
+    checkIn,
+    setSessionOccurred,
+    issueCertificate,
+    verifyCertificate
+  } = useTrainingData();
+  const currentMember = members.find((member) => member.userId === currentUser?.localId);
+  const currentMemberId = currentMember?.localId || '';
 
   // Extended DB records mapping safely
   const courses = coursesRaw as ExtendedTraining[];
@@ -279,7 +289,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
   };
 
   // Set default view based on user role admin status
-  const currentRoleAdmin = currentRole?.isAdmin;
+  const currentRoleAdmin = currentRole?.id === 'administrator' || currentRole?.id === 'lead_pastor';
   const currentRoleId = currentRole?.id;
   useEffect(() => {
     if (currentRoleId) {
@@ -334,7 +344,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
     const cleanCode = rawCode.trim().toUpperCase();
     
     // Look up member
-    let foundMember: MemberRecord | undefined;
+    let foundMember: PocketBaseMember | undefined;
     
     // Try to extract parsed id digits e.g. CC-2026-0003
     const match = cleanCode.match(/CC-2026-(\d+)/);
@@ -417,24 +427,20 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       return;
     }
 
-    // Log attendance successfully
     const scannedAt = new Date().toISOString();
-    const newLog = createLocalRecord<TrainingAttendanceRecord>({
-      sessionId: scannerSelectedSessionId,
-      memberId,
-      scannedAt
-    });
-
-    await db.trainingAttendance.add(newLog);
-
-    // If session is not marked as occurred, mark it occurred automatically
-    const sessionObj = sessions.find(s => s.localId === scannerSelectedSessionId);
-    if (sessionObj && !sessionObj.isOccurred) {
-      await (db.trainingSessions as any).update(sessionObj.id!, { isOccurred: true });
-    }
-
     const timing = selectedCourse ? classifyCheckInTiming(selectedCourse, scannedAt) : null;
     const isLate = timing === 'late';
+    try {
+      const result = await checkIn(scannerSelectedSessionId, memberId, isLate ? 'late' : 'on_time');
+      if (result.duplicate) {
+        setScanResultState('already-checked-in');
+        toast.info(`${memberName} is already checked in for this session.`);
+        return;
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save this check-in.');
+      return;
+    }
 
     setScanResultState(isLate ? 'late' : 'success');
     if (isLate) {
@@ -450,7 +456,9 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
         avatar: memberAvatar,
         courseTitle,
         time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        status: isLate ? '⏰ Late Check-in' : '✓ Checked In'
+        status: typeof navigator !== 'undefined' && !navigator.onLine
+          ? 'Saved Offline'
+          : isLate ? '⏰ Late Check-in' : '✓ Checked In'
       },
       ...prev.slice(0, 4)
     ]);
@@ -463,35 +471,19 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
   // Quick enroll from scanner overlay
   const handleQuickEnrollAndCheckIn = async () => {
     if (!unregisteredScannedMemberId || !scannerSelectedTrainingId || !scannerSelectedSessionId) return;
-
-    const newEnroll = createLocalRecord<TrainingEnrollmentRecord>({
-      trainingId: scannerSelectedTrainingId,
-      memberId: unregisteredScannedMemberId,
-      enrolledAt: new Date().toISOString()
-    });
-
-    await db.trainingEnrollments.add(newEnroll);
-    toast.success('Member enrolled successfully!');
-
-    // Check in immediately
     const scannedAt = new Date().toISOString();
-    const newLog = createLocalRecord<TrainingAttendanceRecord>({
-      sessionId: scannerSelectedSessionId,
-      memberId: unregisteredScannedMemberId,
-      scannedAt
-    });
-
-    await db.trainingAttendance.add(newLog);
-
-    // Mark session occurred
-    const sessionObj = sessions.find(s => s.localId === scannerSelectedSessionId);
-    if (sessionObj && !sessionObj.isOccurred) {
-      await (db.trainingSessions as any).update(sessionObj.id!, { isOccurred: true });
-    }
-
     const enrollCourse = courses.find(c => c.localId === scannerSelectedTrainingId);
     const timing = enrollCourse ? classifyCheckInTiming(enrollCourse, scannedAt) : null;
     const isLate = timing === 'late';
+
+    try {
+      await enrollMember(scannerSelectedTrainingId, unregisteredScannedMemberId);
+      await checkIn(scannerSelectedSessionId, unregisteredScannedMemberId, isLate ? 'late' : 'on_time');
+      toast.success('Member enrolled and checked in successfully!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not enroll and check in this member.');
+      return;
+    }
 
     setScanResultState(isLate ? 'late' : 'success');
     playSuccessChime();
@@ -537,54 +529,30 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       toast.error('Course Title is required');
       return;
     }
-
-    const courseId = 'course-' + Date.now();
-    const newRecord = createLocalRecord<TrainingRecord>({
-      title: newTitle,
-      description: newDescription || 'No description provided.',
-      schedule: newSchedule || 'TBD',
-      status: isDraft ? 'upcoming' : 'ongoing'
-    });
-
-    const finalCourse = {
-      ...newRecord,
-      localId: courseId,
-      startDate: newStartDate,
-      endDate: newEndDate,
-      totalSessions: Number(newTotalSessions) || 8,
-      requiredAttendanceRate: Number(newRequiredRate) || 80,
-      maxEnrollment: Number(newMaxEnrollment) || 0,
-      startTime: newStartTime || undefined,
-      lateGraceMinutes: Number(newLateGraceMinutes) || 0,
-      isDraft,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    await db.trainings.add(finalCourse as any);
-
-    // Schedule default session entries
-    const count = Number(newTotalSessions) || 8;
-    const start = newStartDate ? new Date(newStartDate) : new Date();
-    for (let i = 1; i <= count; i++) {
-      const sessionDate = new Date(start.getTime() + (i - 1) * 7 * 24 * 60 * 60 * 1000)
-        .toISOString().split('T')[0];
-
-      const newSession = createLocalRecord<ExtendedSession>({
-        trainingId: courseId,
-        sessionDate,
-        location: 'Cathedral Hall A'
-      });
-
-      await db.trainingSessions.add({
-        ...newSession,
-        localId: `session-${courseId}-s${i}`,
-        sessionNumber: i,
-        isOccurred: false
-      } as any);
+    if (!newStartDate || !newEndDate || newEndDate < newStartDate) {
+      toast.error('Choose a valid course date range. The end date must follow the start date.');
+      return;
     }
 
-    toast.success(isDraft ? 'Course saved as draft!' : 'Course created successfully!');
+    try {
+      await saveCourse({
+        title: newTitle,
+        description: newDescription || 'No description provided.',
+        schedule: newSchedule || 'TBD',
+        startDate: newStartDate,
+        endDate: newEndDate,
+        totalSessions: Number(newTotalSessions) || 8,
+        requiredAttendanceRate: Number(newRequiredRate) || 80,
+        maxEnrollment: Number(newMaxEnrollment) || 0,
+        startTime: newStartTime,
+        lateGraceMinutes: Number(newLateGraceMinutes) || 0,
+        isDraft
+      });
+      toast.success(isDraft ? 'Course saved as a server-confirmed draft.' : 'Course created successfully!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not create this course.');
+      return;
+    }
     
     // Clear states
     setNewTitle('');
@@ -611,31 +579,32 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       return;
     }
 
-    const newEnroll = createLocalRecord<TrainingEnrollmentRecord>({
-      trainingId: selectedCourseId,
-      memberId,
-      enrolledAt: new Date().toISOString()
-    });
-
-    await db.trainingEnrollments.add(newEnroll);
-    toast.success('Student added to course roster.');
-    setSearchStudentQuery('');
-    setIsAddStudentOpen(false);
+    try {
+      await enrollMember(selectedCourseId, memberId);
+      toast.success('Student added to the confirmed course roster.');
+      setSearchStudentQuery('');
+      setIsAddStudentOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not enroll this member.');
+    }
   };
 
   // Toggle session occurrence status
   const handleToggleSessionOccurred = async (sessionId: string, currentStatus: boolean) => {
     const sessionObj = sessions.find(s => s.localId === sessionId);
-    if (sessionObj && sessionObj.id) {
-      await (db.trainingSessions as any).update(sessionObj.id, { isOccurred: !currentStatus });
+    if (sessionObj) {
+      try {
+        await setSessionOccurred(sessionObj.remoteId || sessionObj.localId, !currentStatus);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Could not update this session.');
+        return;
+      }
       toast.success(!currentStatus ? 'Session marked as occurred!' : 'Session reopened!');
     }
   };
 
   // Certificate approval / issue action
   const handleIssueCertificate = async (trainingId: string, memberId: string) => {
-    const isLeadPastor = currentRole?.id === 'lead_pastor';
-    
     // Check if already issued
     const alreadyIssued = certificates.some(c => c.trainingId === trainingId && c.memberId === memberId);
     if (alreadyIssued) {
@@ -643,27 +612,16 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       return;
     }
 
-    const certId = 'cert-' + Date.now();
-    const certNumber = `CC-CERT-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const newCert = createLocalRecord<TrainingCertificateRecord>({
-      trainingId,
-      memberId,
-      issuedAt: new Date().toISOString(),
-      verifiedBy: currentRole?.name || 'Administrator',
-      status: isLeadPastor ? 'verified' : 'pending'
-    });
-
-    await db.trainingCertificates.add({
-      ...newCert,
-      localId: certId,
-      certificateNumber: certNumber
-    } as any);
-
-    if (isLeadPastor) {
-      toast.success('Certificate officially verified and issued!');
-    } else {
-      toast.success('Certificate draft created. Requested Lead Pastor signature approval!');
+    const courseSessionIds = sessions.filter((session) => session.trainingId === trainingId && session.isOccurred).map((session) => session.localId);
+    const attended = attendanceLogs.filter((attendance) => attendance.memberId === memberId && courseSessionIds.includes(attendance.sessionId)).length;
+    const rate = courseSessionIds.length ? Math.round((attended / courseSessionIds.length) * 100) : 0;
+    try {
+      await issueCertificate(trainingId, memberId, rate);
+      toast.success(currentRole?.id === 'lead_pastor'
+        ? 'Certificate officially verified and issued!'
+        : 'Certificate requested for Lead Pastor signature approval.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not issue this certificate.');
     }
   };
 
@@ -674,34 +632,26 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       return;
     }
 
-    const isLeadPastor = currentRole?.id === 'lead_pastor';
     let count = 0;
 
     for (const mId of eligibleIds) {
       const alreadyHas = certificates.some(c => c.trainingId === trainingId && c.memberId === mId);
       if (!alreadyHas) {
-        const certId = 'cert-' + Date.now() + '-' + count;
-        const certNumber = `CC-CERT-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-        const newCert = createLocalRecord<TrainingCertificateRecord>({
-          trainingId,
-          memberId: mId,
-          issuedAt: new Date().toISOString(),
-          verifiedBy: currentRole?.name || 'Administrator',
-          status: isLeadPastor ? 'verified' : 'pending'
-        });
-
-        await db.trainingCertificates.add({
-          ...newCert,
-          localId: certId,
-          certificateNumber: certNumber
-        } as any);
-        count++;
+        const occurredIds = sessions.filter((session) => session.trainingId === trainingId && session.isOccurred).map((session) => session.localId);
+        const attended = attendanceLogs.filter((attendance) => attendance.memberId === mId && occurredIds.includes(attendance.sessionId)).length;
+        const rate = occurredIds.length ? Math.round((attended / occurredIds.length) * 100) : 0;
+        try {
+          await issueCertificate(trainingId, mId, rate);
+          count++;
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : `Could not issue a certificate for one member.`);
+        }
       }
     }
 
     if (count > 0) {
       toast.success(
-        isLeadPastor 
+        currentRole?.id === 'lead_pastor'
           ? `Bulk issued ${count} certificates successfully!` 
           : `Requested Lead Pastor approval for ${count} eligible certificates!`
       );
@@ -711,57 +661,34 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
   };
 
   // Lead pastor certificate verification
-  const handleVerifyCertificateApproval = async (certId: number) => {
-    await db.trainingCertificates.update(certId, {
-      status: 'verified',
-      verifiedBy: currentRole?.name || 'Lead Pastor'
-    });
-    toast.success('Certificate signed and verified successfully!');
+  const handleVerifyCertificateApproval = async (certificateId: string) => {
+    try {
+      await verifyCertificate(certificateId);
+      toast.success('Certificate signed and verified successfully!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not verify this certificate.');
+    }
   };
 
   // Member course enrollment action
   const handleMemberEnroll = async (courseId: string) => {
-    const isEnrolled = enrollments.some(e => e.trainingId === courseId && e.memberId === currentUser.localId);
+    if (!currentMemberId) {
+      toast.error('Your login is not linked to an active member registry profile.');
+      return;
+    }
+    const isEnrolled = enrollments.some(e => e.trainingId === courseId && e.memberId === currentMemberId);
     if (isEnrolled) return;
 
     const courseObj = courses.find(c => c.localId === courseId);
     if (!courseObj) return;
 
-    // Check capacity
-    const currentEnrolledCount = enrollments.filter(e => e.trainingId === courseId).length;
-    if (courseObj.maxEnrollment > 0 && currentEnrolledCount >= courseObj.maxEnrollment) {
-      toast.error('Course is fully enrolled!');
-      return;
+    try {
+      await enrollMember(courseId, currentMemberId);
+      playSuccessChime();
+      toast.success(`You are confirmed for ${courseObj.title}!`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not complete your enrollment.');
     }
-
-    const newEnroll = createLocalRecord<TrainingEnrollmentRecord>({
-      trainingId: courseId,
-      memberId: currentUser.localId,
-      enrolledAt: new Date().toISOString()
-    });
-
-    await db.trainingEnrollments.add(newEnroll);
-    
-    // Play sound and show toast + push notification
-    playSuccessChime();
-    toast.success(`Welcome to ${courseObj.title}!`);
-
-    // Simulated push notification modal
-    const alertBox = document.createElement('div');
-    alertBox.className = 'fixed bottom-10 left-4 right-4 bg-surface-100 border border-gold-500/30 p-4 rounded-2xl shadow-glow-gold z-50 flex gap-3 animate-bounce';
-    alertBox.innerHTML = `
-      <div class="w-10 h-10 rounded-full bg-gold-500/20 text-gold-500 flex items-center justify-center font-bold">🔔</div>
-      <div class="flex-1 text-left">
-        <h5 class="text-xs font-black text-gold-500 uppercase tracking-widest">Push Notification</h5>
-        <p class="text-xs text-text-primary mt-1 font-bold">Welcome to ${courseObj.title}!</p>
-        <p class="text-[10px] text-text-muted">First session is scheduled for ${courseObj.schedule || 'next week'}.</p>
-      </div>
-    `;
-    document.body.appendChild(alertBox);
-    setTimeout(() => {
-      alertBox.classList.add('transition-opacity', 'duration-500', 'opacity-0');
-      setTimeout(() => document.body.removeChild(alertBox), 500);
-    }, 4500);
   };
 
   // Canvas Certificate Drawing & Download Function
@@ -954,86 +881,6 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
     };
   };
 
-  // Setup sample mock data when list is empty
-  const handleAutoSeed = async () => {
-    const defaultCourses = [
-      {
-        localId: 'course-discipleship-101',
-        title: 'Discipleship Academy 101',
-        description: 'Learn the principles of christian fellowship, faith growth, and house prayer altars.',
-        schedule: 'Saturdays at 10:00 AM',
-        status: 'ongoing',
-        startDate: '2026-06-20',
-        endDate: '2026-08-15',
-        totalSessions: 8,
-        requiredAttendanceRate: 80,
-        maxEnrollment: 20,
-        isDraft: false,
-        syncStatus: 'synced'
-      },
-      {
-        localId: 'course-leadership-201',
-        title: 'Christian Leadership Academy 201',
-        description: 'Equipping future Hope Cell leaders with practical theology, pulpit preaching tools, and cell coordination methods.',
-        schedule: 'Sundays at 2:00 PM',
-        status: 'upcoming',
-        startDate: '2026-07-12',
-        endDate: '2026-09-06',
-        totalSessions: 10,
-        requiredAttendanceRate: 80,
-        maxEnrollment: 15,
-        isDraft: false,
-        syncStatus: 'synced'
-      }
-    ];
-
-    for (const c of defaultCourses) {
-      const exists = courses.some(ex => ex.localId === c.localId);
-      if (!exists) {
-        await db.trainings.add(c as any);
-        
-        // Add weekly sessions
-        for (let i = 1; i <= c.totalSessions; i++) {
-          const sessionDate = new Date(new Date(c.startDate).getTime() + (i - 1) * 7 * 24 * 60 * 60 * 1000)
-            .toISOString().split('T')[0];
-
-          await db.trainingSessions.add({
-            localId: `session-${c.localId}-s${i}`,
-            trainingId: c.localId,
-            sessionDate,
-            location: 'Annex Room A',
-            sessionNumber: i,
-            isOccurred: i === 1, // Mark first as occurred for seed demo
-            syncStatus: 'synced'
-          } as any);
-        }
-      }
-    }
-
-    // Add some sample enrollments if empty
-    if (enrollments.length === 0) {
-      const sampleEnrolls = [
-        { localId: 'enroll-s1', trainingId: 'course-discipleship-101', memberId: 'user-member-clara', enrolledAt: new Date().toISOString(), syncStatus: 'synced' },
-        { localId: 'enroll-s2', trainingId: 'course-discipleship-101', memberId: 'mem-3', enrolledAt: new Date().toISOString(), syncStatus: 'synced' },
-        { localId: 'enroll-s3', trainingId: 'course-discipleship-101', memberId: 'mem-4', enrolledAt: new Date().toISOString(), syncStatus: 'synced' }
-      ];
-      for (const e of sampleEnrolls) {
-        await db.trainingEnrollments.add(e as any);
-      }
-      
-      // Seed first check-in
-      await db.trainingAttendance.add({
-        localId: 't-att-s1',
-        sessionId: 'session-course-discipleship-101-s1',
-        memberId: 'user-member-clara',
-        scannedAt: new Date().toISOString(),
-        syncStatus: 'synced'
-      } as any);
-    }
-
-    toast.success('Academy sample database populated!');
-  };
-
   return (
     <div className="space-y-4 flex flex-col h-full select-none pb-20 relative text-text-primary" id="training-module-root">
       
@@ -1068,6 +915,20 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
           </button>
         </div>
       </div>}
+
+      {(trainingPendingCount > 0 || trainingFailedCount > 0 || trainingError || trainingRefreshing) && (
+        <div className={`rounded-xl border px-3 py-2 text-[10px] font-semibold ${
+          trainingFailedCount > 0
+            ? 'border-red-500/20 bg-red-500/5 text-red-700 dark:text-red-300'
+            : 'border-gold-500/20 bg-gold-500/5 text-text-secondary'
+        }`}>
+          {trainingFailedCount > 0
+            ? `${trainingFailedCount} attendance check-in${trainingFailedCount === 1 ? '' : 's'} need attention. ${trainingError || ''}`
+            : trainingError || (trainingPendingCount > 0
+              ? `${trainingPendingCount} check-in${trainingPendingCount === 1 ? '' : 's'} saved on this device and waiting to sync.`
+              : 'Refreshing the Academy catalog…')}
+        </div>
+      )}
 
       {/* ======================================================================
           ADMIN VIEW — COURSE MANAGEMENT (CMS) & QR SCANNER
@@ -1523,7 +1384,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                                 </div>
                                 <div className="min-w-0">
                                   <h5 className="text-xs font-black text-text-primary truncate">{mInfo?.fullName || 'Sister Clara'}</h5>
-                                  <p className="text-[10px] text-text-muted mt-0.5 font-mono">{getMemberBadgeCode(enroll.memberId)}</p>
+                                  <p className="text-[10px] text-text-muted mt-0.5 font-mono">{mInfo?.qrCode || getMemberBadgeCode(enroll.memberId)}</p>
                                 </div>
                               </div>
 
@@ -1669,7 +1530,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                                 {certInfo ? (
                                   certInfo.status === 'pending' && currentRole?.id === 'lead_pastor' ? (
                                     <button
-                                      onClick={() => handleVerifyCertificateApproval(certInfo.id!)}
+                                      onClick={() => handleVerifyCertificateApproval(certInfo.remoteId || certInfo.localId)}
                                       className="px-2.5 py-1.5 bg-gold-500 hover:bg-gold-400 text-black rounded-pill font-black text-[9px] tracking-wider uppercase cursor-pointer transition-colors flex items-center gap-1"
                                     >
                                       <Check className="w-3 h-3" />
@@ -1752,14 +1613,10 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                 {courses.length === 0 ? (
                   <div className="p-8 text-center space-y-4 bg-surface-100 border border-white/5 rounded-3xl">
                     <p className="text-xs text-text-secondary italic leading-relaxed">
-                      No training courses found in database cache. Create one or auto-seed sample courses below!
+                      {trainingLoading
+                        ? 'Loading the confirmed Academy catalog…'
+                        : 'No Academy courses have been published yet. Create the first course to begin.'}
                     </p>
-                    <button
-                      onClick={handleAutoSeed}
-                      className="px-4 py-2 bg-gold-500/15 border border-gold-500/25 text-gold-500 rounded-full font-black text-xs uppercase tracking-wider hover:bg-gold-500 hover:text-black transition-all cursor-pointer"
-                    >
-                      Seed Demo Courses
-                    </button>
                   </div>
                 ) : (
                   courses
@@ -1838,10 +1695,15 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
           ====================================================================== */}
       {roleView === 'member' && (
         <div className="space-y-5 text-left animate-fadeIn">
+          {!currentMember && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-text-secondary">
+              Your login is not linked to an active member registry profile yet. You can browse the Academy catalog, but enrollment and your QR pass require an administrator to link your profile.
+            </div>
+          )}
           <SectionTitle title="My Academy" />
 
           {/* MY QR BADGE CARD */}
-          <div className="flex justify-center px-1" id="member-badge-card">
+          {currentMember && <div className="flex justify-center px-1" id="member-badge-card">
             <GlassCard
               variant="elevated"
               className="p-5 w-full max-w-[290px] text-center border-white/10 relative overflow-hidden flex flex-col items-center justify-center cursor-pointer hover:scale-[1.01] transition-transform shadow-glow-gold/10"
@@ -1857,14 +1719,14 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
 
               {/* QR Container (White bg, never inverted) */}
               <div className="bg-white p-3.5 rounded-2xl shadow-lg ring-4 ring-gold-500/10 flex items-center justify-center mb-4 cursor-pointer hover:scale-[1.02] transition-transform">
-                <SimulatedQRCode value={getMemberBadgeCode(currentUser.localId)} size={160} />
+                <SimulatedQRCode value={currentMember?.qrCode || getMemberBadgeCode(currentUser.localId)} size={160} />
               </div>
 
               <h4 className="text-base font-black text-text-primary leading-tight">
                 {currentUser.name}
               </h4>
               <span className="text-xs font-mono font-bold text-text-muted mt-1 block tracking-wider">
-                {getMemberBadgeCode(currentUser.localId)}
+                {currentMember?.qrCode || getMemberBadgeCode(currentUser.localId)}
               </span>
 
               <span className="text-[10px] font-bold text-text-muted mt-4 block flex items-center justify-center gap-1">
@@ -1872,26 +1734,26 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                 Tap to expand fullscreen check-in
               </span>
             </GlassCard>
-          </div>
+          </div>}
 
           {/* MY ENROLLED COURSES */}
           <div className="space-y-3">
             <SectionTitle
               title="My Courses"
               badge={{
-                label: `${enrollments.filter(e => e.memberId === currentUser.localId).length} Enrolled`,
+                label: `${enrollments.filter(e => e.memberId === currentMemberId).length} Enrolled`,
                 variant: 'gold'
               }}
             />
 
             <div className="grid grid-cols-1 gap-3">
-              {enrollments.filter(e => e.memberId === currentUser.localId).length === 0 ? (
+              {enrollments.filter(e => e.memberId === currentMemberId).length === 0 ? (
                 <div className="py-8 text-center text-xs text-text-muted italic bg-surface-100 rounded-3xl border border-white/5">
                   You are not enrolled in any training courses yet. Browse catalog below to register!
                 </div>
               ) : (
                 enrollments
-                  .filter(e => e.memberId === currentUser.localId)
+                  .filter(e => e.memberId === currentMemberId)
                   .map((enroll) => {
                     const courseObj = courses.find(c => c.localId === enroll.trainingId);
                     if (!courseObj) return null;
@@ -1901,7 +1763,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                     const sessionIds = courseSessions.map(s => s.localId);
                     
                     const attendedCount = attendanceLogs.filter(
-                      a => a.memberId === currentUser.localId && sessionIds.includes(a.sessionId)
+                      a => a.memberId === currentMemberId && sessionIds.includes(a.sessionId)
                     ).length;
 
                     const currentRate = stats.occurredCount > 0 
@@ -1964,14 +1826,14 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
           <div className="space-y-3">
             <SectionTitle title="My Certificates" />
             
-            {certificates.filter(c => c.memberId === currentUser.localId && c.status === 'verified').length === 0 ? (
+            {certificates.filter(c => c.memberId === currentMemberId && c.status === 'verified').length === 0 ? (
               <div className="p-8 text-center text-xs text-text-muted italic bg-surface-100 rounded-3xl border border-white/5">
                 No verified certificates earned yet. Keep attending courses to graduate!
               </div>
             ) : (
               <div className="flex gap-3.5 overflow-x-auto pb-2 px-0.5 scrollbar-none snap-x snap-mandatory" id="earned-certificates-slider">
                 {certificates
-                  .filter(c => c.memberId === currentUser.localId && c.status === 'verified')
+                  .filter(c => c.memberId === currentMemberId && c.status === 'verified')
                   .map((cert) => {
                     const courseObj = courses.find(co => co.localId === cert.trainingId);
                     const courseTitle = courseObj?.title || 'Academy Course';
@@ -2025,26 +1887,19 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                 courses
                   .filter(c => c.status === 'upcoming' || c.status === 'ongoing')
                   .map((course) => {
-                    const isEnrolled = enrollments.some(e => e.trainingId === course.localId && e.memberId === currentUser.localId);
-                    const currentEnrolls = enrollments.filter(e => e.trainingId === course.localId).length;
+                    const isEnrolled = enrollments.some(e => e.trainingId === course.localId && e.memberId === currentMemberId);
                     const maxCount = course.maxEnrollment || 0;
-                    const seatsLeft = maxCount > 0 ? maxCount - currentEnrolls : 999;
-                    const isFull = maxCount > 0 && seatsLeft <= 0;
 
                     return (
                       <ContentRow
                         key={course.localId}
                         title={course.title}
                         subtitle={course.description}
-                        meta={`${course.schedule} · ${maxCount > 0 ? seatsLeft + ' seats left' : 'Unlimited seats'}`}
+                        meta={`${course.schedule} · ${maxCount > 0 ? 'Limited enrollment' : 'Open enrollment'}`}
                         action={
                           isEnrolled ? (
                             <span className="px-3 py-1 bg-semantic-success/10 border border-semantic-success/20 text-semantic-success font-bold text-[10px] rounded-full">
                               Enrolled ✓
-                            </span>
-                          ) : isFull ? (
-                            <span className="px-3 py-1 bg-surface-200 text-text-muted font-bold text-[10px] rounded-full">
-                              Fully Enrolled
                             </span>
                           ) : (
                             <button
@@ -2277,8 +2132,8 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                 </div>
               </div>
 
-              {/* SIMULATION TESTING SUITE (CRITICAL FOR SANDBOX TESTING) */}
-              <div className="absolute bottom-[220px] left-0 right-0 px-5 z-20 space-y-2">
+              {/* Development-only scanner simulator */}
+              {isRoleSimulatorEnabled && <div className="absolute bottom-[220px] left-0 right-0 px-5 z-20 space-y-2">
                 <span className="text-[10px] font-black text-white/40 uppercase tracking-wider block text-left">
                   💻 Simulator Testing Console
                 </span>
@@ -2289,7 +2144,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                       {members.slice(0, 5).map(m => (
                         <button
                           key={m.localId}
-                          onClick={() => handleBarcodeDecoded(getMemberBadgeCode(m.localId))}
+                          onClick={() => handleBarcodeDecoded(m.qrCode || getMemberBadgeCode(m.localId))}
                           className="px-2.5 py-1 bg-gold-500/20 border border-gold-500/30 text-gold-400 rounded-full text-[10px] font-bold hover:bg-gold-500 hover:text-black cursor-pointer transition-colors flex-shrink-0"
                         >
                           Scan {m.fullName.split(' ')[0]}
@@ -2298,7 +2153,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                     </div>
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* MANUAL CODE ENTRY FALLBACK */}
               <div className="absolute bottom-[135px] left-0 right-0 px-5 z-20">
@@ -2381,13 +2236,13 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
               <h3 className="text-lg font-black text-[#7B1D31] uppercase tracking-[0.15em] text-center">Fellowship Pass</h3>
               
               <div className="p-5 bg-white border-4 border-[#D4A84A] rounded-3xl shadow-xl">
-                <SimulatedQRCode value={getMemberBadgeCode(currentUser.localId)} size={260} />
+                <SimulatedQRCode value={currentMember?.qrCode || getMemberBadgeCode(currentUser.localId)} size={260} />
               </div>
 
               <div className="text-center space-y-1">
                 <h4 className="text-2xl font-black text-black">{currentUser.name}</h4>
                 <p className="text-sm font-mono font-bold text-gray-500 tracking-wider">
-                  {getMemberBadgeCode(currentUser.localId)}
+                  {currentMember?.qrCode || getMemberBadgeCode(currentUser.localId)}
                 </p>
               </div>
 

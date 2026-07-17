@@ -136,7 +136,12 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
       }
       pb.authStore.clear();
       await clearLegacyIdentity();
-      await db.transaction('rw', [db.members, db.departments, db.sections, db.cellGroups, db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports], async () => {
+      await db.transaction('rw', [
+        db.members, db.departments, db.sections, db.cellGroups,
+        db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports,
+        db.trainings, db.trainingSessions, db.trainingEnrollments,
+        db.trainingAttendance, db.trainingCertificates
+      ], async () => {
         await Promise.all([
           db.members.filter((record) => Boolean(record.remoteId)).delete(),
           db.departments.filter((record) => Boolean(record.remoteId)).delete(),
@@ -145,7 +150,12 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
           db.cellMeetings.filter((record) => record.syncStatus === 'synced').delete(),
           db.cellAttendance.filter((record) => record.syncStatus === 'synced').delete(),
           db.cellVisitors.filter((record) => record.syncStatus === 'synced').delete(),
-          db.cellReports.filter((record) => record.syncStatus === 'synced').delete()
+          db.cellReports.filter((record) => record.syncStatus === 'synced').delete(),
+          db.trainings.filter((record) => record.syncStatus === 'synced').delete(),
+          db.trainingSessions.filter((record) => record.syncStatus === 'synced').delete(),
+          db.trainingEnrollments.filter((record) => record.syncStatus === 'synced').delete(),
+          db.trainingAttendance.filter((record) => record.syncStatus === 'synced').delete(),
+          db.trainingCertificates.filter((record) => record.syncStatus === 'synced').delete()
         ]);
       });
       setUser(null);

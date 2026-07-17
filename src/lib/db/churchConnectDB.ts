@@ -121,11 +121,14 @@ export type CellOperationCommand =
   | 'submit_report'
   | 'review_report';
 
+export type TrainingOperationCommand = 'training_check_in';
+export type OutboxCommand = CellOperationCommand | TrainingOperationCommand;
+
 export interface OutboxRecord {
   id?: number;
   operationId: string;
   ownerId: string;
-  command: CellOperationCommand;
+  command: OutboxCommand;
   entityId: string;
   payload: Record<string, unknown>;
   status: 'pending' | 'processing' | 'failed';
@@ -137,28 +140,47 @@ export interface OutboxRecord {
 }
 
 export interface TrainingRecord extends LocalFirstRecord {
+  code?: string;
   title: string;
   description: string;
   schedule: string;
   status: 'upcoming' | 'ongoing' | 'completed';
+  startDate?: string;
+  endDate?: string;
+  totalSessions?: number;
+  requiredAttendanceRate?: number;
+  maxEnrollment?: number;
+  isDraft?: boolean;
+  startTime?: string;
+  lateGraceMinutes?: number;
+  createdBy?: string;
 }
 
 export interface TrainingSessionRecord extends LocalFirstRecord {
   trainingId: string;
   sessionDate: string;     // YYYY-MM-DD
   location: string;
+  sessionNumber?: number;
+  isOccurred?: boolean;
+  status?: 'scheduled' | 'completed' | 'cancelled';
+  createdBy?: string;
 }
 
 export interface TrainingEnrollmentRecord extends LocalFirstRecord {
   trainingId: string;
   memberId: string;
   enrolledAt: string;
+  status?: 'enrolled' | 'withdrawn' | 'completed';
+  enrolledBy?: string;
 }
 
 export interface TrainingAttendanceRecord extends LocalFirstRecord {
   sessionId: string;
   memberId: string;
   scannedAt: string;
+  timing?: 'on_time' | 'late';
+  markedBy?: string;
+  operationId?: string;
 }
 
 export interface TrainingCertificateRecord extends LocalFirstRecord {
@@ -167,6 +189,11 @@ export interface TrainingCertificateRecord extends LocalFirstRecord {
   issuedAt: string;
   verifiedBy: string;      // user name / localId
   status: 'pending' | 'verified';
+  certificateNumber?: string;
+  attendanceRate?: number;
+  requestedBy?: string;
+  verifiedById?: string;
+  verifiedAt?: string;
 }
 
 export interface PrayerRequestRecord extends LocalFirstRecord {
@@ -288,6 +315,14 @@ export class ChurchConnectDB extends Dexie {
       cellVisitors: '++id, &localId, remoteId, meetingId, cellGroupId, fullName, followUpStatus, syncStatus, cacheOwnerId',
       cellReports: '++id, localId, remoteId, meetingId, cellGroupId, reportStatus, syncStatus, cacheOwnerId',
       outbox: '++id, &operationId, ownerId, command, entityId, status, nextAttemptAt, createdAt'
+    });
+
+    this.version(3).stores({
+      trainings: '++id, localId, remoteId, code, title, status, isDraft, syncStatus, cacheOwnerId',
+      trainingSessions: '++id, localId, remoteId, trainingId, sessionDate, sessionNumber, status, syncStatus, cacheOwnerId',
+      trainingEnrollments: '++id, localId, remoteId, trainingId, memberId, status, syncStatus, cacheOwnerId',
+      trainingAttendance: '++id, localId, remoteId, sessionId, memberId, timing, syncStatus, cacheOwnerId',
+      trainingCertificates: '++id, localId, remoteId, trainingId, memberId, status, certificateNumber, syncStatus, cacheOwnerId'
     });
   }
 }

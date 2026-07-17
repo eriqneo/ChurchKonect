@@ -135,3 +135,24 @@ If Node networking is restricted while `curl` can reach PocketHost, add `--trans
 only a bootstrap transport fallback; the browser app continues to use PocketBase directly.
 
 The versioned schema is in `pb_migrations/202607171700_create_cell_operations.js`.
+
+## Training Academy
+
+Academy courses and sessions use a scoped PocketBase cache. Course creation, enrollment, session
+state changes, and certificates require a live server acknowledgement. Attendance check-ins are
+the exception: authorized Academy managers can continue scanning during a short outage, and each
+check-in is retained in the durable outbox until PocketBase confirms it exactly once.
+
+Only Administrators and the Lead Pastor manage courses and rosters. Certificate requests created
+by an Administrator remain pending until the Lead Pastor verifies them; members can read only
+their own enrollments, attendance, and certificates.
+
+To reconcile and live-test the Academy schema:
+
+```bash
+npm run backend:bootstrap-training -- --email=YOUR_SUPERUSER_EMAIL
+```
+
+The command uses disposable users and removes all test data. Add `--transport=curl` only when the
+local Node network path cannot reach PocketHost. The versioned schema is in
+`pb_migrations/202607171930_create_training_academy.js`.

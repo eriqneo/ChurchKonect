@@ -204,10 +204,15 @@ function isTransient(error: unknown): boolean {
 
 async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  const cellCommands = new Set(['start_meeting', 'mark_attendance', 'add_visitor', 'submit_report', 'review_report']);
   // A tab or app process may have closed after claiming an item. Reclaim it safely;
   // every server command below is idempotent.
-  await db.outbox.where('ownerId').equals(ownerId).filter((item) => item.status === 'processing').modify({ status: 'pending' });
-  const items = await db.outbox.where('ownerId').equals(ownerId).filter((item) => item.status === 'pending').sortBy('createdAt');
+  await db.outbox.where('ownerId').equals(ownerId)
+    .filter((item) => item.status === 'processing' && cellCommands.has(item.command))
+    .modify({ status: 'pending' });
+  const items = await db.outbox.where('ownerId').equals(ownerId)
+    .filter((item) => item.status === 'pending' && cellCommands.has(item.command))
+    .sortBy('createdAt');
   for (const item of items) {
     if (!item.id) continue;
     await db.outbox.update(item.id, { status: 'processing', attempts: item.attempts + 1, updatedAt: new Date().toISOString() });

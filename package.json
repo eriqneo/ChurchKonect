@@ -11,6 +11,7 @@
     "backend:bootstrap-members": "node scripts/pocketbase/bootstrap-members.mjs",
     "backend:bootstrap-cell-structure": "node scripts/pocketbase/bootstrap-cell-structure.mjs",
     "backend:bootstrap-cell-operations": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-cell-operations.mjs",
+    "backend:bootstrap-training": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-training.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name churchkonect",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
