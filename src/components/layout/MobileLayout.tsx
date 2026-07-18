@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
@@ -61,6 +61,7 @@ import { NotificationSystem } from '../communication/NotificationSystem';
 import { useNotifications } from '../../lib/db/notificationData';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useOperationalSync } from '../../lib/db/syncData';
+import { useHomeDashboard } from '../../lib/db/homeData';
 import { APP_ROLES, getRoleView } from '../../lib/auth/roles';
 
 
@@ -71,6 +72,19 @@ import { APP_ROLES, getRoleView } from '../../lib/auth/roles';
 export const ROLES = APP_ROLES;
 
 const ENABLE_ROLE_SIMULATOR = import.meta.env.DEV && import.meta.env.VITE_ENABLE_ROLE_SIMULATOR === 'true';
+
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function readableEventTime(value: string): string {
+  if (!value) return '';
+  const [hours, minutes] = value.split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return value;
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
 
 export function MobileLayout() {
   const { theme, toggleTheme, isDark } = useTheme();
@@ -124,6 +138,21 @@ export function MobileLayout() {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const currentRole = getRoleView(user!);
+  const {
+    snapshot: homeSnapshot,
+    isLoading: isHomeLoading,
+    isOfflineSnapshot: isHomeOfflineSnapshot,
+    error: homeError
+  } = useHomeDashboard(activeTab === 'home');
+  const homeSummary = homeSnapshot?.summary;
+  const isPastoralDashboard = currentRole.isAdmin || currentRole.id === 'lead_pastor' || currentRole.id === 'district_pastor';
+  const selectedDateKey = localDateKey(selectedDate);
+  const gatheringMarks = useMemo(() => Object.fromEntries(
+    (homeSnapshot?.gatherings ?? []).map((item) => [item.eventDate, 'complete' as const])
+  ), [homeSnapshot]);
+  const selectedGatherings = useMemo(() => (
+    homeSnapshot?.gatherings.filter((item) => item.eventDate === selectedDateKey) ?? []
+  ), [homeSnapshot, selectedDateKey]);
   
   const { unreadCount: activeUnreadCount } = useNotifications();
 
@@ -377,6 +406,11 @@ export function MobileLayout() {
                     <h1 className="text-xl font-extrabold tracking-tight text-theme-text flex items-center gap-1.5">
                       {currentRole.name} <Sparkles className="w-4.5 h-4.5 text-gold-500 animate-pulse flex-shrink-0" />
                     </h1>
+                    {(homeError || isHomeOfflineSnapshot) && (
+                      <p className="mt-2 text-[10px] leading-relaxed text-theme-text-muted" role={homeError ? 'status' : undefined}>
+                        {homeError || 'Showing the last confirmed dashboard while freshness is checked.'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Motivational Quote / Scripture Card (Inspired by Quote of Day) */}
@@ -386,35 +420,47 @@ export function MobileLayout() {
                   />
 
                   {/* Role-Specific Hero Banner */}
-                  {currentRole.id === 'lead_pastor' || currentRole.id === 'district_pastor' ? (
+                  {isPastoralDashboard ? (
                     <HeroCard
-                      eyebrow="Pastor's Portal"
-                      title="Sunday Gathering Prep"
-                      subtitle="Confirm sermon notes, review leader reports, and inspect weekly offerings."
+                      eyebrow="Leadership Portal"
+                      title={homeSummary?.pendingActionCount
+                        ? `${homeSummary.pendingActionCount} cell ${homeSummary.pendingActionCount === 1 ? 'report' : 'reports'} ready for review`
+                        : 'Leadership dashboard is current'}
+                      subtitle={homeSummary
+                        ? `${homeSummary.weeklyAttendance} recorded attendees across ${homeSummary.activeCellCount} active ${homeSummary.activeCellCount === 1 ? 'cell' : 'cells'} this week.`
+                        : 'Loading the latest leadership summary from PocketBase.'}
                       actionLabel="Review Reports"
                       onAction={() => setActiveTab('reports')}
                     />
                   ) : currentRole.id === 'cell_leader' ? (
                     <HeroCard
                       eyebrow="Cell Ministry"
-                      title="Manage Today's Fellowship"
-                      subtitle="Open your assigned fellowship to start a meeting and record attendance."
+                      title={homeSummary?.pendingActionCount
+                        ? `${homeSummary.pendingActionCount} ${homeSummary.pendingActionCount === 1 ? 'report needs' : 'reports need'} submission`
+                        : 'Your fellowship records are current'}
+                      subtitle={homeSummary
+                        ? `${homeSummary.memberCount} active ${homeSummary.memberCount === 1 ? 'member' : 'members'} across your assigned fellowship.`
+                        : 'Loading your assigned fellowship summary from PocketBase.'}
                       actionLabel="Open Cells"
                       onAction={() => setActiveTab('cells')}
                     />
                   ) : currentRole.id === 'guest' ? (
                     <HeroCard
                       eyebrow="New to Church?"
-                      title="The First Steps Alpha"
-                      subtitle="Join our digital companion class this Thursday to study the foundations of faith."
+                      title="Explore the Church Academy"
+                      subtitle={homeSummary
+                        ? `${homeSummary.activeCourseCount} ${homeSummary.activeCourseCount === 1 ? 'course is' : 'courses are'} currently open or upcoming.`
+                        : 'Loading the current course catalog from PocketBase.'}
                       actionLabel="Browse Academy"
                       onAction={() => setActiveTab('academy')}
                     />
                   ) : (
                     <HeroCard
-                      eyebrow="This Sunday"
-                      title="School of Leaders 1"
-                      subtitle="Module 3 study materials are now available in your personal Academy vault."
+                      eyebrow={homeSummary?.currentCourseTitle ? 'Your Academy' : 'Church Academy'}
+                      title={homeSummary?.currentCourseTitle || 'Explore available courses'}
+                      subtitle={homeSummary?.currentCourseTitle
+                        ? `${homeSummary.academyProgress}% attendance progress across your active enrollments.`
+                        : 'Browse current courses and enroll when you are ready.'}
                       actionLabel="Go to Academy"
                       onAction={() => setActiveTab('academy')}
                     />
@@ -424,8 +470,16 @@ export function MobileLayout() {
                   <div>
                     <SectionTitle title="Pending Actions" />
                     <div className="space-y-2.5">
-                      {currentRole.isAdmin || currentRole.id === 'lead_pastor' ? (
-                        <>
+                      {!homeSummary ? (
+                        <GlassCard className="p-4 flex items-center gap-3">
+                          {isOnline
+                            ? <RefreshCw className={`w-4 h-4 text-gold-500 ${isHomeLoading ? 'animate-spin' : ''}`} />
+                            : <WifiOff className="w-4 h-4 text-theme-text-muted" />}
+                          <p className="text-xs font-semibold text-theme-text-secondary">
+                            {isOnline ? 'Loading confirmed actions…' : 'Connect once to save this dashboard for offline use.'}
+                          </p>
+                        </GlassCard>
+                      ) : isPastoralDashboard && homeSummary.pendingActionCount > 0 ? (
                           <GlassCard 
                             pressable={true}
                             onPress={() => { triggerHaptic(); setActiveTab('reports'); }}
@@ -433,34 +487,33 @@ export function MobileLayout() {
                           >
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-cathedral-500/10 text-cathedral-400 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                                2
+                                {homeSummary.pendingActionCount}
                               </div>
                               <div>
                                 <h4 className="text-xs font-bold text-theme-text">Cell Reports Pending Approval</h4>
-                                <p className="text-[10px] text-theme-text-secondary mt-0.5">Review Hope & Faith fellowship submissions</p>
+                                <p className="text-[10px] text-theme-text-secondary mt-0.5">Review the latest PocketBase submissions</p>
                               </div>
                             </div>
                             <ChevronRight className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
                           </GlassCard>
-                        </>
-                      ) : currentRole.id === 'cell_leader' ? (
+                      ) : currentRole.id === 'cell_leader' && homeSummary.pendingActionCount > 0 ? (
                         <GlassCard 
                           pressable={true}
-                          onPress={() => { triggerHaptic(); setActiveTab('reports'); }}
+                          onPress={() => { triggerHaptic(); setActiveTab('cells'); }}
                           className="p-3 flex items-center justify-between border-l-4 border-l-gold-500 cursor-pointer hover:bg-theme-text/5"
                         >
                           <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-gold-500/10 text-gold-500 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                              !
+                              {homeSummary.pendingActionCount}
                             </div>
                             <div>
-                              <h4 className="text-xs font-bold text-theme-text">Submit Weekly Cell Report</h4>
-                              <p className="text-[10px] text-theme-text-secondary mt-0.5">Due today for Hope Fellowship Cell</p>
+                              <h4 className="text-xs font-bold text-theme-text">Complete Fellowship Reports</h4>
+                              <p className="text-[10px] text-theme-text-secondary mt-0.5">Completed meetings are waiting for their reports</p>
                             </div>
                           </div>
                           <ChevronRight className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
                         </GlassCard>
-                      ) : (
+                      ) : !isPastoralDashboard && currentRole.id !== 'cell_leader' && homeSummary.currentCourseTitle && homeSummary.academyProgress < 100 ? (
                         <GlassCard 
                           pressable={true}
                           onPress={() => { triggerHaptic(); setActiveTab('academy'); }}
@@ -471,11 +524,21 @@ export function MobileLayout() {
                               1
                             </div>
                             <div>
-                              <h4 className="text-xs font-bold text-theme-text">Complete Academy Module 3</h4>
-                              <p className="text-[10px] text-theme-text-secondary mt-0.5">School of Leaders 1 course progress</p>
+                              <h4 className="text-xs font-bold text-theme-text">Continue {homeSummary.currentCourseTitle}</h4>
+                              <p className="text-[10px] text-theme-text-secondary mt-0.5">Current attendance progress: {homeSummary.academyProgress}%</p>
                             </div>
                           </div>
                           <ChevronRight className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
+                        </GlassCard>
+                      ) : (
+                        <GlassCard className="p-3 flex items-center gap-3 border-l-4 border-l-semantic-success">
+                          <div className="w-8 h-8 rounded-full bg-semantic-success/10 text-semantic-success flex items-center justify-center flex-shrink-0">
+                            <CheckCircle2 className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-bold text-theme-text">You are all caught up</h4>
+                            <p className="text-[10px] text-theme-text-secondary mt-0.5">No server-confirmed actions need your attention.</p>
+                          </div>
                         </GlassCard>
                       )}
                     </div>
@@ -487,69 +550,82 @@ export function MobileLayout() {
                     <DayStrip
                       selectedDate={selectedDate}
                       onSelectDate={setSelectedDate}
-                      markedDates={{
-                        '2026-07-01': 'complete',
-                        '2026-07-03': 'partial',
-                        '2026-07-05': 'complete'
-                      }}
+                      markedDates={gatheringMarks}
                     />
                   </div>
 
                   {/* Stats Block Metrics (Replicating Workout patterns) */}
                   <div>
-                    <SectionTitle title="Durable Metrics" />
+                    <SectionTitle title="Live Overview" />
                     <div className="grid grid-cols-2 gap-3">
-                      {currentRole.isAdmin || currentRole.id === 'lead_pastor' ? (
+                      {isPastoralDashboard ? (
                         <>
                           <StatBlock
                             icon={<Users className="w-4 h-4" />}
-                            value="432"
-                            label="Worship Attendants"
-                            trend={{ direction: 'up', value: '+12%' }}
+                            value={homeSummary?.weeklyAttendance ?? '—'}
+                            label="Weekly Cell Attendance"
                             highlight={true}
                           />
                           <StatBlock
                             icon={<Flame className="w-4 h-4" />}
-                            value="18"
+                            value={homeSummary?.activeCellCount ?? '—'}
                             label="Active Cells"
-                            trend={{ direction: 'up', value: '3 new' }}
+                          />
+                        </>
+                      ) : currentRole.id === 'cell_leader' ? (
+                        <>
+                          <StatBlock
+                            icon={<Users className="w-4 h-4" />}
+                            value={homeSummary?.memberCount ?? '—'}
+                            label="Fellowship Members"
+                            highlight={true}
+                          />
+                          <StatBlock
+                            icon={<FileText className="w-4 h-4" />}
+                            value={homeSummary?.pendingActionCount ?? '—'}
+                            label="Reports Due"
                           />
                         </>
                       ) : (
                         <>
                           <StatBlock
-                            icon={<Sparkles className="w-4 h-4" />}
-                            value="12"
-                            label="Prayer Streaks"
-                            trend={{ direction: 'up', value: 'Lv.3' }}
+                            icon={<BookOpen className="w-4 h-4" />}
+                            value={homeSummary?.enrollmentCount ?? '—'}
+                            label="Academy Enrollments"
                             highlight={true}
                           />
                           <StatBlock
-                            icon={<BookOpen className="w-4 h-4" />}
-                            value="84%"
+                            icon={<Sparkles className="w-4 h-4" />}
+                            value={homeSummary ? `${homeSummary.academyProgress}%` : '—'}
                             label="Academy Progress"
-                            trend={{ direction: 'up', value: '8/10' }}
                           />
                         </>
                       )}
                     </div>
                   </div>
 
-                  {/* Gatherings Schedule (inspired by picks for you list) */}
+                  {/* Server-confirmed gatherings for the selected day */}
                   <div>
-                    <SectionTitle title="Today's Gathers" />
-                    <ContentRow
-                      title="Sunday Grace Gathering"
-                      subtitle="Sanctuary • Main preach"
-                      meta="10:00 AM · Full Congregation"
-                      onPress={() => setActiveTab('announcements')}
-                    />
-                    <ContentRow
-                      title="Youth Praise & Study"
-                      subtitle="West Chapel • High energy praise"
-                      meta="04:30 PM · Youth ministry"
-                      onPress={() => setActiveTab('announcements')}
-                    />
+                    <SectionTitle title={`Gatherings · ${selectedDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`} />
+                    {selectedGatherings.length > 0 ? selectedGatherings.map((item) => (
+                      <ContentRow
+                        key={item.id}
+                        title={item.title}
+                        subtitle={item.body}
+                        meta={[readableEventTime(item.eventTime), item.eventLocation].filter(Boolean).join(' · ') || undefined}
+                        onPress={() => setActiveTab('announcements')}
+                      />
+                    )) : (
+                      <GlassCard className="p-4 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-gold-500/10 text-gold-600 dark:text-gold-400 flex items-center justify-center flex-shrink-0">
+                          <Calendar className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-theme-text">No published gatherings for this day</h4>
+                          <p className="text-[10px] text-theme-text-secondary mt-0.5">Dates with confirmed events are marked above.</p>
+                        </div>
+                      </GlassCard>
+                    )}
                   </div>
 
                 </div>

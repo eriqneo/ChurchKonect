@@ -51,6 +51,7 @@ editing across many devices.
 | Authentication | `PocketBaseProvider.tsx` uses PocketBase auth and refresh tokens | Server-authoritative |
 | Identity | PocketBase auth is the production identity and role source | Reconciled |
 | Saints Directory | Paginated privacy-safe view with scoped cache and server aggregate counts | Connected without exposing registry PII |
+| Mobile Home | Lightweight private aggregate row plus published event dates with an account-scoped snapshot | Connected; sample activity and metrics retired |
 | PocketBase hooks | Production collections, views, rules, and live bootstrap tests are versioned | Active |
 | Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
@@ -265,6 +266,10 @@ no admin secret appears in the client bundle.
 server rules, not component checks, block unauthorized access.
 
 ### Phase 3 — Server-backed reads, module by module (~1–1.5 days)
+
+**Implemented:** the mobile Home screen now reads a single role-aware, account-scoped aggregate
+row and published gathering dates. It revalidates only while visible and retains a safe snapshot
+for a brief outage; hardcoded report, attendance, cell, course, and gathering activity is retired.
 
 Order: reference data → members/cells → training → announcements → prayer → reports.
 

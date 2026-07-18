@@ -132,6 +132,7 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
       pb.authStore.clear();
       await clearLegacyIdentity();
       await db.appSettings.where('key').startsWith('reportSnapshot:').delete();
+      await db.appSettings.where('key').startsWith('homeDashboard:').delete();
       await db.transaction('rw', [
         db.members, db.departments, db.sections, db.cellGroups,
         db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports,

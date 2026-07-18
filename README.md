@@ -257,6 +257,27 @@ npm run backend:bootstrap-reports -- --email=YOUR_SUPERUSER_EMAIL --transport=cu
 
 The versioned schema is in `pb_migrations/202607182300_create_reporting_views.js`.
 
+## Mobile Home dashboard
+
+The Explore screen uses one lightweight `home_dashboard` view row scoped to the authenticated
+account. It derives report actions, role-scoped fellowship/member totals, recent attendance, and
+personal Academy progress on PocketBase instead of loading the six leadership analytics views or
+displaying sample values. The view exposes no prayer content, member contact details, or another
+account's row.
+
+Published announcement events provide the calendar marks and gathering list. A confirmed
+account-scoped snapshot is rendered during a short outage and revalidated only while Home is
+visible, keeping normal mobile launch traffic to two small requests.
+
+To reconcile the projection and run disposable own-row, cross-account, anonymous, read-only, and
+event-query tests:
+
+```bash
+npm run backend:bootstrap-home-dashboard -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607190430_create_home_dashboard.js`.
+
 ## Communication and Notifications
 
 The notification center is derived from real PocketBase events: published announcements, prayer
