@@ -7,6 +7,8 @@ import {
 } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
 import { useCellOperations } from '../../lib/db/cellOperations';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { sendCellReportReminder } from '../../lib/db/notificationData';
 import {
   GlassCard,
   AccentBadge,
@@ -69,6 +71,7 @@ interface ConfettiParticle {
 
 export function CellGroupModule() {
   const { user, role } = useCurrentUser();
+  const { pb, user: authUser } = useAuth();
   const {
     members: allMembers,
     updateMember,
@@ -661,7 +664,16 @@ export function CellGroupModule() {
   const handleSendReminder = async (cellGroup: PocketBaseCellGroup) => {
     triggerHaptic(20);
     const leaderName = cellGroup.leaderName || allMembers.find(m => m.userId === cellGroup.leaderId)?.fullName || 'Cell Leader';
-    showToast(`Reminder delivery for ${leaderName} will be enabled with the Notifications backend module.`);
+    if (!authUser || !cellGroup.leaderId) {
+      showToast('Assign a signed-in cell leader before sending a reminder.');
+      return;
+    }
+    try {
+      await sendCellReportReminder(pb, authUser.id, cellGroup.leaderId, cellGroup.localId, cellGroup.name);
+      showToast(`Weekly report reminder sent to ${leaderName}.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'The reminder could not be sent.');
+    }
   };
 
   // Confetti Blast Effect on Report Approval
@@ -1831,7 +1843,7 @@ export function CellGroupModule() {
                         onClick={() => handleSendReminder(c)}
                         className="px-2 py-0.5 bg-gold-500 text-black font-black text-[8px] rounded uppercase cursor-pointer"
                       >
-                        Reminder Setup
+                        Send reminder
                       </button>
                     </div>
                   );

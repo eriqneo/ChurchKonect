@@ -1,216 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Megaphone, 
-  Heart, 
-  Clipboard, 
-  Award, 
-  Bell, 
-  Trash2, 
-  Check, 
-  Sparkles, 
-  Clock, 
-  X, 
-  UserCheck, 
-  BookOpen, 
-  ShieldAlert, 
-  ArrowRight,
-  ShieldCheck,
-  CalendarDays
-} from 'lucide-react';
-import { useNotifications, useCurrentUser } from '../../lib/db/hooks';
-import { db, generateUUID, type NotificationRecord } from '../../lib/db/churchConnectDB';
-import { GlassCard, AccentBadge } from '../shared';
-import { useToast } from '../shared/toast/useToast';
+import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { Award, Bell, Clipboard, Heart, Megaphone, RefreshCw, Trash2 } from 'lucide-react';
+import type { NotificationRecord } from '../../lib/db/churchConnectDB';
+import { useNotifications } from '../../lib/db/notificationData';
 import { setAppBadge } from '../../lib/notifications/pwaService';
+import { GlassCard } from '../shared';
+import { useToast } from '../shared/toast/useToast';
 
-// Define the 12 triggers and events
-export interface TriggerTemplate {
-  id: string;
-  event: string;
-  roleDescription: string;
-  type: 'announcement' | 'prayer' | 'report' | 'certificate' | 'system';
-  title: string;
-  message: string;
-  actionUrl: string;
-  isPush: boolean;
-  isInApp: boolean;
-  targetRole: 'all' | 'admin' | 'intercessor' | 'submitter' | 'pastor' | 'cell_leader' | 'member';
+interface NotificationSystemProps {
+  onActiveTabChange?: (tab: string) => void;
+  onClose?: () => void;
 }
 
-export const NOTIFICATION_TRIGGER_TEMPLATES: TriggerTemplate[] = [
-  {
-    id: 'trig-1',
-    event: 'New announcement published',
-    roleDescription: 'All members',
-    type: 'announcement',
-    title: 'Divine Awakening Convocation 2026',
-    message: 'The annual Holy Convocation starts next Friday. Make plans to attend with your cell group!',
-    actionUrl: 'announcements',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'all'
-  },
-  {
-    id: 'trig-2',
-    event: 'Prayer request submitted',
-    roleDescription: 'Admins (for triage)',
-    type: 'prayer',
-    title: 'New Healing Request For Triage',
-    message: 'Sister Elizabeth has submitted a prayer request regarding a critical surgery scheduled for Monday.',
-    actionUrl: 'prayer',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'admin'
-  },
-  {
-    id: 'trig-3',
-    event: 'Prayer assigned to intercessor',
-    roleDescription: 'The assigned intercessor',
-    type: 'prayer',
-    title: 'Intercessory Assignment Received',
-    message: 'You have been assigned to cover Brother Daniel\'s spiritual guidance prayer request.',
-    actionUrl: 'prayer',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'intercessor'
-  },
-  {
-    id: 'trig-4',
-    event: 'Prayer marked as answered',
-    roleDescription: 'Original submitter',
-    type: 'prayer',
-    title: 'Hallelujah! Your prayer is answered',
-    message: 'Pastor Michael has updated the healing prayer list with testimonies of complete restoration.',
-    actionUrl: 'prayer',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'submitter'
-  },
-  {
-    id: 'trig-5',
-    event: 'Cell report submitted',
-    roleDescription: 'Lead Pastor + section admin',
-    type: 'report',
-    title: 'New Fellowship Cell Report submitted',
-    message: 'Hope Fellowship Cell report has been submitted by Michael. 12 Saints attended.',
-    actionUrl: 'reports',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'pastor'
-  },
-  {
-    id: 'trig-6',
-    event: 'Cell report approved',
-    roleDescription: 'The cell leader who submitted',
-    type: 'report',
-    title: 'Your Cell Report is Approved',
-    message: 'Section Pastor David approved your Cell Meeting attendance report for week 26.',
-    actionUrl: 'reports',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'cell_leader'
-  },
-  {
-    id: 'trig-7',
-    event: 'Certificate ready',
-    roleDescription: 'The member who earned it',
-    type: 'certificate',
-    title: 'Discipleship Diploma Ready!',
-    message: 'Congratulations! Your Leadership Academy Level 2 Certificate has been verified and signed.',
-    actionUrl: 'profile',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'member'
-  },
-  {
-    id: 'trig-8',
-    event: 'Missed fellowship reminder',
-    roleDescription: 'Cell leaders who haven\'t submitted',
-    type: 'system',
-    title: 'Pending Cell Fellowship Report',
-    message: 'Reminder: Cell reports are due within 24 hours of fellowship. Please submit attendance.',
-    actionUrl: 'reports',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'cell_leader'
-  },
-  {
-    id: 'trig-9',
-    event: 'New member enrolled',
-    roleDescription: 'The new member (welcome)',
-    type: 'system',
-    title: 'Welcome to the Church Family! 🕊',
-    message: 'We are overjoyed to welcome you. Your QR Saints Membership Pass is now live in your profile.',
-    actionUrl: 'profile',
-    isPush: false,
-    isInApp: true,
-    targetRole: 'member'
-  },
-  {
-    id: 'trig-10',
-    event: 'Course enrollment confirmed',
-    roleDescription: 'The enrolled member',
-    type: 'system',
-    title: 'Course Enrollment Confirmed',
-    message: 'You are enrolled in Discipleship 101: Foundation Principles. Classes begin this Saturday.',
-    actionUrl: 'profile',
-    isPush: false,
-    isInApp: true,
-    targetRole: 'member'
-  },
-  {
-    id: 'trig-11',
-    event: 'Training session reminder',
-    roleDescription: 'Enrolled members, 1 day before',
-    type: 'system',
-    title: 'Academy Training Session Tomorrow',
-    message: 'Reminder: The next classroom session of leadership starts tomorrow at 10:00 AM.',
-    actionUrl: 'profile',
-    isPush: true,
-    isInApp: true,
-    targetRole: 'member'
-  },
-  {
-    id: 'trig-12',
-    event: 'Role or department change',
-    roleDescription: 'The affected member',
-    type: 'system',
-    title: 'Department Clearance Granted',
-    message: 'Admin sarah approved your shift request to the Intercessory Ministry department.',
-    actionUrl: 'profile',
-    isPush: false,
-    isInApp: true,
-    targetRole: 'member'
-  }
-];
-
-// Relative time formatting helper
-export function getRelativeTime(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    if (diffMs < 0) return 'Just now';
-
-    const diffMins = Math.floor(diffMs / (60 * 1000));
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  } catch (e) {
-    return 'Recently';
-  }
-}
-
-// Grouping helper
 interface GroupedNotifications {
   Today: NotificationRecord[];
   Yesterday: NotificationRecord[];
@@ -218,401 +19,166 @@ interface GroupedNotifications {
   Earlier: NotificationRecord[];
 }
 
-export function groupNotifications(notifs: NotificationRecord[]): GroupedNotifications {
-  const grouped: GroupedNotifications = {
-    Today: [],
-    Yesterday: [],
-    'This Week': [],
-    Earlier: []
-  };
-
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
-  const thisWeekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
-
-  notifs.forEach(notif => {
-    try {
-      const time = new Date(notif.createdAt).getTime();
-      if (time >= todayStart) {
-        grouped.Today.push(notif);
-      } else if (time >= yesterdayStart) {
-        grouped.Yesterday.push(notif);
-      } else if (time >= thisWeekStart) {
-        grouped['This Week'].push(notif);
-      } else {
-        grouped.Earlier.push(notif);
-      }
-    } catch (e) {
-      grouped.Earlier.push(notif);
-    }
-  });
-
-  return grouped;
+function relativeTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Recently';
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-// Icon mapper matching SettingsRow style circles
-export function getNotificationIcon(type: NotificationRecord['type']) {
-  switch (type) {
-    case 'announcement':
-      return {
-        icon: <Megaphone className="w-4 h-4 text-gold-500 stroke-[2.5]" />,
-        bg: 'bg-gold-500/10 dark:bg-gold-500/15 text-gold-500'
-      };
-    case 'prayer':
-      return {
-        icon: <Heart className="w-4 h-4 text-cathedral-400 stroke-[2.5]" />,
-        bg: 'bg-cathedral-500/15 text-cathedral-400'
-      };
-    case 'report':
-      return {
-        icon: <Clipboard className="w-4 h-4 text-sage-400 stroke-[2.5]" />,
-        bg: 'bg-sage-500/15 text-sage-400'
-      };
-    case 'certificate':
-      return {
-        icon: <Award className="w-4 h-4 text-gold-500 stroke-[2.5]" />,
-        bg: 'bg-gold-500/15 text-gold-500'
-      };
-    case 'system':
-    default:
-      return {
-        icon: <Bell className="w-4 h-4 text-text-secondary stroke-[2.5]" />,
-        bg: 'bg-surface-300 dark:bg-surface-300/80 text-text-secondary'
-      };
+function groupNotifications(notifications: NotificationRecord[]): GroupedNotifications {
+  const groups: GroupedNotifications = { Today: [], Yesterday: [], 'This Week': [], Earlier: [] };
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const yesterdayStart = todayStart - 86_400_000;
+  const weekStart = todayStart - 7 * 86_400_000;
+  for (const notification of notifications) {
+    const time = new Date(notification.createdAt).getTime();
+    if (time >= todayStart) groups.Today.push(notification);
+    else if (time >= yesterdayStart) groups.Yesterday.push(notification);
+    else if (time >= weekStart) groups['This Week'].push(notification);
+    else groups.Earlier.push(notification);
   }
+  return groups;
 }
 
-interface NotificationSystemProps {
-  onActiveTabChange?: (tab: string) => void;
-  onClose?: () => void;
-  currentRole?: any;
+function notificationIcon(type: NotificationRecord['type']) {
+  if (type === 'announcement') return { icon: <Megaphone className="h-4 w-4" />, style: 'bg-gold-500/10 text-gold-500' };
+  if (type === 'prayer') return { icon: <Heart className="h-4 w-4" />, style: 'bg-cathedral-500/15 text-cathedral-400' };
+  if (type === 'report') return { icon: <Clipboard className="h-4 w-4" />, style: 'bg-sage-500/15 text-sage-400' };
+  if (type === 'certificate') return { icon: <Award className="h-4 w-4" />, style: 'bg-gold-500/15 text-gold-500' };
+  return { icon: <Bell className="h-4 w-4" />, style: 'bg-theme-bg-secondary text-theme-text-secondary' };
 }
 
-export function NotificationSystem({ onActiveTabChange, onClose, currentRole }: NotificationSystemProps) {
-  const { user: dbUser, role: dbRole } = useCurrentUser();
-  
-  const activeRole = currentRole || dbRole;
-  const activeUserId = currentRole
-    ? (currentRole.id === 'lead_pastor' ? 'user-pastor-david' : 
-       currentRole.id === 'admin' ? 'user-admin-sarah' :
-       currentRole.id === 'cell_leader' ? 'user-cell-leader-michael' : 'user-member-clara')
-    : dbUser.localId;
-
-  const { notifications, unreadCount, markRead, markAllRead } = useNotifications(activeUserId);
-  const toast = useToast();
-
+export function NotificationSystem({ onActiveTabChange, onClose }: NotificationSystemProps) {
+  const { notifications, unreadCount, isLoading, isRefreshing, error, refresh, markRead, markAllRead, dismiss } = useNotifications();
   const [confirmDismissId, setConfirmDismissId] = useState<string | null>(null);
-  const [showSimPanel, setShowSimPanel] = useState<boolean>(false);
-
-  // Sync PWA badge count
-  useEffect(() => {
-    if ('setAppBadge' in navigator) {
-      setAppBadge(unreadCount).catch(console.error);
-    }
-  }, [unreadCount]);
-
-  // Subscribe to real-time notification simulation
-  useEffect(() => {
-    console.log('[PocketBase] Initializing mock real-time subscriptions for announcements, cell_meetings, notifications');
-    
-    // Simulate periodic announcement and meeting updates
-    const interval = setInterval(() => {
-      // 10% chance to simulate a real-time event
-      if (Math.random() < 0.15) {
-        // Pick a random template
-        const randTemplate = NOTIFICATION_TRIGGER_TEMPLATES[Math.floor(Math.random() * NOTIFICATION_TRIGGER_TEMPLATES.length)];
-        
-        // Filter whether the active user is a suitable target
-        let shouldDeliver = false;
-        if (randTemplate.targetRole === 'all') {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'admin' && activeRole.isAdmin) {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'pastor' && activeRole.id === 'lead_pastor') {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'cell_leader' && activeRole.id === 'cell_leader') {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'member' && activeRole.id === 'member') {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'intercessor' && (activeRole.id === 'cell_leader' || activeRole.isAdmin)) {
-          shouldDeliver = true;
-        } else if (randTemplate.targetRole === 'submitter' && activeRole.id === 'member') {
-          shouldDeliver = true;
-        }
-
-        if (shouldDeliver) {
-          triggerEvent(randTemplate);
-        }
-      }
-    }, 45000); // Check every 45s
-
-    return () => clearInterval(interval);
-  }, [activeUserId, activeRole.id, activeRole.isAdmin]);
-
-  const triggerEvent = async (template: TriggerTemplate) => {
-    // 1. Create database record
-    const newNotif: NotificationRecord = {
-      localId: generateUUID(),
-      userId: template.targetRole === 'all' ? 'all' : activeUserId,
-      type: template.type,
-      title: template.title,
-      message: template.message,
-      isRead: false,
-      createdAt: new Date().toISOString(),
-      actionUrl: template.actionUrl
-    };
-
-    await db.notifications.add(newNotif);
-
-    // 2. Play subtle haptic feedback
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      try { navigator.vibrate([100, 50, 100]); } catch (e) {}
-    }
-
-    // 3. Show dynamic toast notification based on type
-    const toastType = 
-      template.type === 'announcement' ? 'success' : 
-      template.type === 'prayer' ? 'error' : 
-      template.type === 'report' ? 'info' : 
-      template.type === 'certificate' ? 'warning' : 'info';
-
-    toast.show(
-      template.title,
-      toastType,
-      4000,
-      () => {
-        // Execute action URL on click
-        if (onActiveTabChange && template.actionUrl) {
-          onActiveTabChange(template.actionUrl);
-          if (onClose) onClose();
-        }
-      }
-    );
-
-    // 4. Register Local Mock PWA Push Notification if enabled
-    if (template.isPush && 'Notification' in window && Notification.permission === 'granted') {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        reg.showNotification(template.title, {
-          body: template.message,
-          icon: '/churchconnect-logo.svg',
-          badge: '/churchconnect-logo.svg',
-          tag: template.id,
-          vibrate: [100, 50, 100],
-          data: { url: template.actionUrl }
-        } as any);
-      } catch (e) {
-        new Notification(template.title, { body: template.message });
-      }
-    }
-  };
-
-  const handleDismiss = async (localId: string) => {
-    const existing = await db.notifications.where('localId').equals(localId).first();
-    if (existing && existing.id) {
-      await db.notifications.delete(existing.id);
-      toast.info('Notification dismissed');
-    }
-    setConfirmDismissId(null);
-  };
-
-  const handleNotificationTap = async (notif: NotificationRecord) => {
-    // Mark as read
-    await markRead(notif.localId);
-    
-    // Play haptic
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      try { navigator.vibrate(10); } catch (e) {}
-    }
-
-    // Navigate to target tab
-    if (notif.actionUrl && onActiveTabChange) {
-      onActiveTabChange(notif.actionUrl);
-      if (onClose) onClose();
-    }
-  };
-
+  const toast = useToast();
   const groups = groupNotifications(notifications);
-  const timeGroupKeys: (keyof GroupedNotifications)[] = ['Today', 'Yesterday', 'This Week', 'Earlier'];
-  const hasNotifications = notifications.length > 0;
+
+  useEffect(() => { void setAppBadge(unreadCount); }, [unreadCount]);
+
+  const openNotification = async (notification: NotificationRecord) => {
+    await markRead(notification.localId);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try { navigator.vibrate(10); } catch { /* unsupported device */ }
+    }
+    if (notification.actionUrl && onActiveTabChange) {
+      onActiveTabChange(notification.actionUrl);
+      onClose?.();
+    }
+  };
+
+  const confirmDismiss = async () => {
+    if (!confirmDismissId) return;
+    await dismiss(confirmDismissId);
+    setConfirmDismissId(null);
+    toast.info('Notification dismissed');
+  };
 
   return (
     <div className="space-y-4 select-none pb-8">
-      {/* Header with Title & Action */}
-      <div className="flex items-center justify-between border-b border-theme-border/10 pb-3 mt-1">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-black text-theme-text uppercase tracking-wider">
-            Notifications
-          </h3>
-          {unreadCount > 0 && (
-            <span className="bg-gold-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full">
-              {unreadCount} NEW
-            </span>
-          )}
+      <div className="flex items-center justify-between gap-3 border-b border-theme-border/10 pb-3 mt-1">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-black text-theme-text uppercase tracking-wider">Notifications</h3>
+            {unreadCount > 0 && (
+              <span className="rounded-full bg-gold-500 px-1.5 py-0.5 text-[9px] font-black text-black">{unreadCount} NEW</span>
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-theme-text-secondary">PocketBase events · recent alerts cached for short outages</p>
         </div>
-
-        <div className="flex items-center gap-3">
+        <div className="flex flex-shrink-0 items-center gap-2">
           <button
-            onClick={() => setShowSimPanel(!showSimPanel)}
-            className="text-[10px] font-black text-theme-text-secondary border border-theme-border/30 px-2 py-1 rounded-md bg-theme-bg-secondary hover:bg-theme-text/5 cursor-pointer transition-colors"
+            type="button"
+            onClick={() => void refresh()}
+            disabled={isRefreshing}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-theme-border/40 text-theme-text-secondary disabled:opacity-50"
+            aria-label="Refresh notifications"
           >
-            {showSimPanel ? 'Hide Dev Sim' : 'Simulate Alerts'}
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           </button>
-          
           {unreadCount > 0 && (
             <button
-              onClick={() => {
-                markAllRead();
-                toast.success('All notifications marked as read');
-              }}
-              className="text-xs font-bold text-gold-500 hover:underline cursor-pointer"
+              type="button"
+              onClick={() => void markAllRead().then(() => toast.success('All notifications marked as read'))}
+              className="text-[10px] font-bold text-gold-500"
             >
-              Mark All Read
+              Read all
             </button>
           )}
         </div>
       </div>
 
-      {/* DEV SIMULATION PANEL */}
-      <AnimatePresence>
-        {showSimPanel && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <GlassCard className="p-3 border border-gold-500/20 bg-gold-500/[0.02] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black text-gold-500 uppercase tracking-widest flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Real-time Trigger Panel</span>
-                </span>
-                <span className="text-[9px] text-text-muted font-bold font-mono">
-                  Target Role: {activeRole.label}
-                </span>
-              </div>
-              
-              <p className="text-[10px] text-theme-text-secondary leading-normal">
-                Click any church event below to immediately trigger a **real-time subscription event** which adds to local state, triggers a custom **header-float Toast**, updates **home screen PWA badges**, and fires service worker native pushes.
-              </p>
+      {error && (
+        <div className="rounded-xl border border-gold-500/20 bg-gold-500/5 px-3 py-2 text-[10px] leading-relaxed text-theme-text-secondary">
+          {error}
+        </div>
+      )}
 
-              <div className="grid grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto pr-1">
-                {NOTIFICATION_TRIGGER_TEMPLATES.map((tmpl) => (
-                  <button
-                    key={tmpl.id}
-                    onClick={() => triggerEvent(tmpl)}
-                    className="p-1.5 rounded-lg border border-theme-border bg-theme-bg/60 text-left hover:bg-theme-text/5 cursor-pointer text-[9px] leading-snug flex flex-col justify-between hover:border-gold-500/40 transition-all"
-                  >
-                    <span className="font-extrabold text-theme-text truncate">{tmpl.event}</span>
-                    <span className="text-text-muted mt-0.5 text-[8px] font-bold">To: {tmpl.roleDescription}</span>
-                  </button>
-                ))}
-              </div>
-            </GlassCard>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Notifications List Grouped by Time */}
-      <div className="space-y-4">
-        {!hasNotifications ? (
-          <div className="text-center py-16 px-4">
-            <span className="text-3xl block mb-2">🕊</span>
-            <p className="text-sm font-black text-theme-text-secondary">
-              All caught up! 🕊
-            </p>
-            <p className="text-xs text-text-muted mt-1">
-              You have no pending notification alerts at this time.
-            </p>
-          </div>
-        ) : (
-          timeGroupKeys.map((group) => {
-            const list = groups[group];
-            if (list.length === 0) return null;
-
+      {isLoading && notifications.length === 0 ? (
+        <div className="px-4 py-16 text-center">
+          <RefreshCw className="mx-auto mb-3 h-8 w-8 animate-spin text-gold-500" />
+          <p className="text-xs font-bold text-theme-text-secondary">Loading your notification feed…</p>
+        </div>
+      ) : notifications.length === 0 ? (
+        <div className="px-4 py-16 text-center">
+          <Bell className="mx-auto mb-3 h-10 w-10 text-theme-text-muted" strokeWidth={1.5} />
+          <p className="text-sm font-black text-theme-text-secondary">All caught up</p>
+          <p className="mt-1 text-xs text-theme-text-muted">New ministry events addressed to you will appear here.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {(['Today', 'Yesterday', 'This Week', 'Earlier'] as const).map((group) => {
+            if (!groups[group].length) return null;
             return (
-              <div key={group} className="space-y-2">
-                {/* Time Group Divider */}
-                <h5 className="text-[10px] font-black uppercase tracking-widest text-text-muted px-1">
-                  {group}
-                </h5>
-
+              <section key={group} className="space-y-2">
+                <h4 className="px-1 text-[10px] font-black uppercase tracking-widest text-theme-text-muted">{group}</h4>
                 <div className="space-y-2">
                   <AnimatePresence mode="popLayout">
-                    {list.map((notif) => {
-                      const details = getNotificationIcon(notif.type);
-                      
+                    {groups[group].map((notification) => {
+                      const details = notificationIcon(notification.type);
                       return (
                         <motion.div
-                          key={notif.localId}
-                          initial={{ opacity: 0, y: 12 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, x: -300 }}
-                          transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+                          key={notification.localId}
                           layout
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, x: -240 }}
                           className="relative overflow-hidden rounded-xl"
                         >
-                          {/* Swipe background color (Cathedral color) */}
-                          <div className="absolute inset-0 bg-cathedral-600 flex items-center justify-end pr-5 text-white rounded-xl">
-                            <div className="flex flex-col items-center justify-center gap-1 select-none">
-                              <Trash2 className="w-4.5 h-4.5" />
-                              <span className="text-[9px] font-bold">Dismiss</span>
-                            </div>
+                          <div className="absolute inset-0 flex items-center justify-end rounded-xl bg-cathedral-600 pr-5 text-white">
+                            <Trash2 className="h-4 w-4" />
                           </div>
-
-                          {/* Swipeable Foreground GlassCard */}
                           <motion.div
                             drag="x"
                             dragDirectionLock
-                            dragConstraints={{ left: -100, right: 0 }}
+                            dragConstraints={{ left: -90, right: 0 }}
                             dragElastic={{ left: 0.1, right: 0 }}
-                            onDragEnd={(event, info) => {
-                              // If they drag past -60px, open dismissal confirmation dialog
-                              if (info.offset.x < -60) {
-                                setConfirmDismissId(notif.localId);
-                              }
-                            }}
+                            onDragEnd={(_, info) => { if (info.offset.x < -55) setConfirmDismissId(notification.localId); }}
                             className="relative z-10 touch-pan-y"
                           >
                             <GlassCard
-                              variant={notif.isRead ? "default" : "elevated"}
-                              pressable={true}
-                              onPress={() => handleNotificationTap(notif)}
-                              className={`p-3 flex gap-3.5 items-center bg-surface-100 dark:bg-surface-100/95 light:bg-white border border-theme-border/30 hover:border-theme-border transition-all cursor-pointer relative ${
-                                !notif.isRead ? 'border-l-3 border-l-gold-500' : ''
-                              }`}
+                              pressable
+                              variant={notification.isRead ? 'default' : 'elevated'}
+                              onPress={() => void openNotification(notification)}
+                              className={`flex cursor-pointer items-center gap-3.5 border border-theme-border/30 bg-theme-bg p-3 ${notification.isRead ? '' : 'border-l-3 border-l-gold-500'}`}
                             >
-                              {/* Left Icon circle */}
-                              <div className={`w-9.5 h-9.5 rounded-full flex items-center justify-center flex-shrink-0 ${details.bg}`}>
-                                {details.icon}
+                              <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${details.style}`}>{details.icon}</div>
+                              <div className="min-w-0 flex-1">
+                                <h5 className={`truncate text-[11px] uppercase tracking-wide ${notification.isRead ? 'font-bold text-theme-text-secondary' : 'font-black text-theme-text'}`}>{notification.title}</h5>
+                                <p className="mt-0.5 line-clamp-2 text-[11px] leading-normal text-theme-text-secondary">{notification.message}</p>
                               </div>
-
-                              {/* Center text elements */}
-                              <div className="flex-1 min-w-0 pr-1.5">
-                                <h4 className={`text-[11px] uppercase tracking-wide truncate leading-tight ${
-                                  !notif.isRead 
-                                    ? 'font-black text-theme-text' 
-                                    : 'font-extrabold text-theme-text-secondary'
-                                }`}>
-                                  {notif.title}
-                                </h4>
-                                <p className="text-[11px] text-text-muted mt-0.5 leading-normal line-clamp-2">
-                                  {notif.message}
-                                </p>
-                              </div>
-
-                              {/* Right elements: relative timestamp & unread gold dot */}
-                              <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                                <span className="text-[9px] font-bold text-text-muted font-mono whitespace-nowrap">
-                                  {getRelativeTime(notif.createdAt)}
-                                </span>
-                                {!notif.isRead ? (
-                                  <span className="w-2 h-2 rounded-full bg-gold-500 shadow-glow-gold" />
-                                ) : (
-                                  <div className="w-2 h-2" />
-                                )}
+                              <div className="flex flex-shrink-0 flex-col items-end gap-2">
+                                <span className="whitespace-nowrap font-mono text-[9px] font-bold text-theme-text-muted">{relativeTime(notification.createdAt)}</span>
+                                {!notification.isRead && <span className="h-2 w-2 rounded-full bg-gold-500 shadow-glow-gold" />}
                               </div>
                             </GlassCard>
                           </motion.div>
@@ -621,45 +187,29 @@ export function NotificationSystem({ onActiveTabChange, onClose, currentRole }: 
                     })}
                   </AnimatePresence>
                 </div>
-              </div>
+              </section>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
 
-      {/* CONFIRMATION DIALOG FOR DISMISSAL */}
       <AnimatePresence>
-        {confirmDismissId !== null && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs select-none">
+        {confirmDismissId && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-surface-100 dark:bg-surface-100 border border-theme-border rounded-2xl p-5 max-w-xs w-full shadow-2xl space-y-4"
+              className="w-full max-w-xs space-y-4 rounded-2xl border border-theme-border bg-theme-bg p-5 shadow-2xl"
             >
               <div className="text-center">
-                <Trash2 className="w-10 h-10 text-cathedral-400 mx-auto mb-2" />
-                <h4 className="text-sm font-black text-theme-text uppercase tracking-wide">
-                  Dismiss Notification?
-                </h4>
-                <p className="text-[11px] text-theme-text-secondary mt-1.5 leading-normal">
-                  Are you sure you want to permanently clear this alert from your log?
-                </p>
+                <Trash2 className="mx-auto mb-2 h-9 w-9 text-cathedral-400" />
+                <h4 className="text-sm font-black text-theme-text">Dismiss this notification?</h4>
+                <p className="mt-1.5 text-[11px] leading-normal text-theme-text-secondary">It will be hidden on all your signed-in devices.</p>
               </div>
-
-              <div className="grid grid-cols-2 gap-2.5 pt-1">
-                <button
-                  onClick={() => handleDismiss(confirmDismissId)}
-                  className="px-3 py-2 bg-cathedral-600 hover:bg-cathedral-500 text-white rounded-xl text-[10px] font-black cursor-pointer transition-all"
-                >
-                  Yes, Dismiss
-                </button>
-                <button
-                  onClick={() => setConfirmDismissId(null)}
-                  className="px-3 py-2 bg-surface-200 hover:bg-theme-text/5 text-text-secondary rounded-xl text-[10px] font-black cursor-pointer transition-all"
-                >
-                  Cancel
-                </button>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button onClick={() => void confirmDismiss()} className="rounded-xl bg-cathedral-600 px-3 py-2 text-[10px] font-black text-white">Dismiss</button>
+                <button onClick={() => setConfirmDismissId(null)} className="rounded-xl bg-theme-bg-secondary px-3 py-2 text-[10px] font-black text-theme-text-secondary">Cancel</button>
               </div>
             </motion.div>
           </div>

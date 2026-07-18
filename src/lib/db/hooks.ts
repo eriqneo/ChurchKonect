@@ -14,7 +14,6 @@ import {
   type TrainingSessionRecord,
   type TrainingAttendanceRecord,
   type TrainingCertificateRecord,
-  type NotificationRecord,
   type AuditLogRecord,
   type UserRecord,
   type FeedbackRecord
@@ -439,56 +438,6 @@ export function useReports(roleId: string) {
     approvedReports: approvedReports || [],
     approveReport,
     isLoading: pendingReports === undefined || approvedReports === undefined
-  };
-}
-
-
-// ==========================================
-// 7. useNotifications() Hook
-// ==========================================
-export function useNotifications(userId = 'user-cell-leader-michael') {
-  const notifications = useLiveQuery(async () => {
-    return await db.notifications
-      .where('userId')
-      .anyOf([userId, 'all'])
-      .reverse()
-      .sortBy('createdAt');
-  }, [userId]);
-
-  const unreadCount = useLiveQuery(async () => {
-    return await db.notifications
-      .where('userId')
-      .anyOf([userId, 'all'])
-      .filter(n => !n.isRead)
-      .count();
-  }, [userId]);
-
-  const markRead = useCallback(async (localId: string) => {
-    const existing = await db.notifications.where('localId').equals(localId).first();
-    if (existing && existing.id) {
-      await db.notifications.update(existing.id, { isRead: true });
-    }
-  }, []);
-
-  const markAllRead = useCallback(async () => {
-    const unread = await db.notifications
-      .where('userId')
-      .anyOf([userId, 'all'])
-      .filter(n => !n.isRead)
-      .toArray();
-
-    for (const notif of unread) {
-      if (notif.id) {
-        await db.notifications.update(notif.id, { isRead: true });
-      }
-    }
-  }, [userId]);
-
-  return {
-    notifications: notifications || [],
-    unreadCount: unreadCount || 0,
-    markRead,
-    markAllRead
   };
 }
 

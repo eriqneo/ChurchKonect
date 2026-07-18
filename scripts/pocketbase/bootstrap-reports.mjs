@@ -129,7 +129,7 @@ async function main() {
 
   await reconcileView(superuser, 'report_cell_daily', `
     SELECT
-      lower(substr(hex(cg.id || substr(cm.meetingDate, 1, 10)), 1, 15)) AS id,
+      lower(substr(cg.id, 1, 7) || replace(substr(cm.meetingDate, 1, 10), '-', '')) AS id,
       cg.id AS cellGroup,
       substr(cm.meetingDate, 1, 10) AS metricDate,
       COUNT(DISTINCT cm.id) AS meetingsCount,
@@ -158,7 +158,7 @@ async function main() {
 
   await reconcileView(superuser, 'report_prayer_daily', `
     SELECT
-      lower(substr(hex(pr.category || substr(pr.submittedAt, 1, 10)), 1, 15)) AS id,
+      lower(substr(hex(pr.category), 1, 7) || replace(substr(pr.submittedAt, 1, 10), '-', '')) AS id,
       substr(pr.submittedAt, 1, 10) AS metricDate,
       pr.category AS category,
       COUNT(DISTINCT pr.id) AS requestCount,

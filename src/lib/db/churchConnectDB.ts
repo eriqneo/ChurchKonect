@@ -239,13 +239,17 @@ export interface IntercessoryTeamRecord extends LocalFirstRecord {
 export interface NotificationRecord {
   id?: number;
   localId: string;
-  userId: string;          // user's localId (or 'all' for general announcements)
+  userId: string;
   type: 'report' | 'prayer' | 'certificate' | 'member' | 'announcement' | 'system';
   title: string;
   message: string;
   isRead: boolean;
-  createdAt: string;       // ISO String
-  actionUrl?: string;      // Tap navigation URL
+  dismissed?: boolean;
+  createdAt: string;
+  actionUrl?: string;
+  cacheOwnerId?: string;
+  remoteReceiptId?: string;
+  receiptSyncStatus?: 'pending' | 'synced';
 }
 
 export interface AuditLogRecord {
@@ -344,6 +348,10 @@ export class ChurchConnectDB extends Dexie {
 
     this.version(4).stores({
       announcements: '++id, &localId, remoteId, tag, pinned, publishAt, expiresAt, backendStatus, syncStatus, cacheOwnerId'
+    });
+
+    this.version(5).stores({
+      notifications: '++id, &localId, userId, type, isRead, dismissed, createdAt, cacheOwnerId, receiptSyncStatus'
     });
   }
 }

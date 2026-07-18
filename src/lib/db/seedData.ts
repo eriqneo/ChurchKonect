@@ -13,7 +13,6 @@ import {
   type CellMeetingRecord,
   type CellAttendanceRecord,
   type CellReportRecord,
-  type NotificationRecord,
   type AuditLogRecord
 } from './churchConnectDB';
 
@@ -562,58 +561,6 @@ export async function seedDatabase() {
     }
   ];
   await db.cellReports.bulkAdd(cellReports);
-
-  // ==========================================
-  // H. SEED 5 NOTIFICATIONS
-  // ==========================================
-  const notifications: NotificationRecord[] = [
-    {
-      localId: 'not-demo-1',
-      userId: 'user-cell-leader-michael',
-      type: 'announcement',
-      title: 'Divine Awakening Convocation',
-      message: 'Pastor David published a pinned announcement: Holy Convocation 2026 starting next Friday.',
-      isRead: true,
-      createdAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString()
-    },
-    {
-      localId: 'not-demo-2',
-      userId: 'user-cell-leader-michael',
-      type: 'prayer',
-      title: 'Intercession Duty Assigned',
-      message: 'You have been assigned to cover Sister Clara\'s healing request in the regional prayer chain.',
-      isRead: true,
-      createdAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString()
-    },
-    {
-      localId: 'not-demo-3',
-      userId: 'user-cell-leader-michael',
-      type: 'certificate',
-      title: 'Leadership Level 2 Verified',
-      message: 'Your Discipleship Academy certificate for Class 4 is signed by Clergy and ready in your Profile.',
-      isRead: false,
-      createdAt: new Date(Date.now() - 20 * 3600 * 1000).toISOString()
-    },
-    {
-      localId: 'not-demo-4',
-      userId: 'user-cell-leader-michael',
-      type: 'report',
-      title: 'Cell Attendance Submitted',
-      message: 'Hope Cell Leader Michael submitted attendance log details for 12 members yesterday.',
-      isRead: false,
-      createdAt: new Date(Date.now() - 26 * 3600 * 1000).toISOString()
-    },
-    {
-      localId: 'not-demo-5',
-      userId: 'user-cell-leader-michael',
-      type: 'member',
-      title: 'First-time Seeker Card Recieved',
-      message: 'visitor_492 (John Doe) has completed the Seeker form and would like to join Hope Cell.',
-      isRead: false,
-      createdAt: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString()
-    }
-  ];
-  await db.notifications.bulkAdd(notifications);
 
   // Audit Logs
   const auditLogs: AuditLogRecord[] = [

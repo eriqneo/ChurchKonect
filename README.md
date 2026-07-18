@@ -221,3 +221,29 @@ npm run backend:bootstrap-reports -- --email=YOUR_SUPERUSER_EMAIL --transport=cu
 ```
 
 The versioned schema is in `pb_migrations/202607182300_create_reporting_views.js`.
+
+## Communication and Notifications
+
+The notification center is derived from real PocketBase events: published announcements, prayer
+assignments and outcomes, submitted and approved cell reports, verified certificates, and Academy
+enrollments. Eight read-only event views expose only the row whose recipient matches the signed-in
+user. Prayer notifications contain category-level wording only and never project petition bodies
+or submitter identity.
+
+Pastoral users can also send the weekly report reminder shown in the Cells oversight screen. These
+are append-only, use a fixed server-side message template, and are deduplicated per cell and week.
+
+Read and dismissed state is stored in `notification_receipts`, scoped to the recipient and shared
+across their devices. A rolling 100-alert cache remains readable during a short outage; offline
+receipt changes stay pending and retry when connectivity returns. The header and installed-app
+badge use the authoritative unread count. This module provides realtime in-app delivery while the
+app is running; true background Web Push still requires a separately deployed push sender and is
+not simulated by the client.
+
+To reconcile the event views and receipts and run disposable cross-account authorization tests:
+
+```bash
+npm run backend:bootstrap-notifications -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607182345_create_notifications.js`.

@@ -86,7 +86,6 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const [showSignOutSheet, setShowSignOutSheet] = useState(false);
 
   // Preference toggles
-  const [notificationsOn, setNotificationsOn] = useState(true);
   const [privacyOn, setPrivacyOn] = useState(true);
 
   // Temp edit form states
@@ -566,24 +565,8 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
                 <SettingsRow
                   icon={<Bell className="w-4.5 h-4.5 text-black" />}
                   iconColor="bg-sage-500"
-                  label="Notifications"
-                  trailing={
-                    <button
-                      onClick={() => {
-                        setNotificationsOn(!notificationsOn);
-                        toast.success(notificationsOn ? 'Notifications disabled' : 'Notifications armed!');
-                      }}
-                      className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none p-0.5 cursor-pointer ${
-                        notificationsOn ? 'bg-gold-500' : 'bg-surface-300'
-                      }`}
-                    >
-                      <motion.div
-                        animate={{ x: notificationsOn ? 24 : 0 }}
-                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                        className="w-5 h-5 rounded-full bg-white shadow-md"
-                      />
-                    </button>
-                  }
+                  label="Notification receipts"
+                  trailing={<AccentBadge label="Synced" variant="sage" size="sm" />}
                 />
 
                 {/* Privacy Settings Row */}

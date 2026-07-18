@@ -1,9 +1,9 @@
 // Bump these version strings on every deploy that must invalidate old caches.
 // The `activate` handler deletes any cache whose name isn't in the current set,
 // so bumping v1 -> v2 purges stale builds and breaks out of a bad cached shell.
-const SHELL_CACHE_NAME = 'churchconnect-shell-v3';
-const DYNAMIC_CACHE_NAME = 'churchconnect-dynamic-v3';
-const IMAGE_CACHE_NAME = 'churchconnect-images-v3';
+const SHELL_CACHE_NAME = 'churchconnect-shell-v4';
+const DYNAMIC_CACHE_NAME = 'churchconnect-dynamic-v4';
+const IMAGE_CACHE_NAME = 'churchconnect-images-v4';
 
 // App shell files to cache initially. Only stable, always-present paths — the
 // hashed JS/CSS bundles are cached on demand as they're requested (their names
@@ -109,7 +109,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. PocketBase / API Request handling (Network-First with offline fallback)
+  // 2. PocketBase / API requests are network-only. Authenticated responses must
+  // never enter shared Cache Storage; account-scoped offline data lives in Dexie.
   if (
     requestUrl.pathname.includes('/api/') ||
     requestUrl.hostname.includes('pocketbase') ||
@@ -117,31 +118,15 @@ self.addEventListener('fetch', (event) => {
   ) {
     event.respondWith(
       fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse.status === 200 || networkResponse.status === 304) {
-            const responseClone = networkResponse.clone();
-            caches.open(DYNAMIC_CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-          }
-          return networkResponse;
-        })
         .catch(() => {
-          console.log('[Service Worker] Network failed, serving API fallback from cache');
-          return caches.match(event.request).then((cachedResponse) => {
-            if (cachedResponse) {
-              return cachedResponse;
-            }
-            // Return custom offline JSON if not in cache
-            return new Response(
-              JSON.stringify({
-                error: 'offline',
-                message: 'You are currently offline. Local-first data will sync once reconnected.',
-                localDataAvailable: true
-              }),
-              { headers: { 'Content-Type': 'application/json' } }
-            );
-          });
+          return new Response(
+            JSON.stringify({
+              error: 'offline',
+              message: 'The server is unavailable. Account-scoped offline data remains in the app cache.',
+              localDataAvailable: true
+            }),
+            { status: 503, headers: { 'Content-Type': 'application/json' } }
+          );
         })
     );
     return;

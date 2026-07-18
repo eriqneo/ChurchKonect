@@ -57,7 +57,7 @@ import { ProfileModule } from '../profile/ProfileModule';
 import { AnnouncementsModule } from '../announcements/AnnouncementsModule';
 import { CommunicationModule } from '../communication/CommunicationModule';
 import { NotificationSystem } from '../communication/NotificationSystem';
-import { useNotifications } from '../../lib/db/hooks';
+import { useNotifications } from '../../lib/db/notificationData';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { APP_ROLES, getRoleView } from '../../lib/auth/roles';
 
@@ -98,7 +98,6 @@ export function MobileLayout() {
   const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
   const lastScrollTopRef = useRef(0);
   const directionalTravelRef = useRef(0);
-  const [notifications, setNotifications] = useState<number>(3);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   
   // Custom expandable state for drawer accordion
@@ -161,8 +160,7 @@ export function MobileLayout() {
 
   const currentRole = getRoleView(user!);
   
-  const activeUserId = user!.id;
-  const { unreadCount: activeUnreadCount } = useNotifications(activeUserId);
+  const { unreadCount: activeUnreadCount } = useNotifications();
 
   // Reveal the navigation whenever the active workspace or a global overlay changes.
   useEffect(() => {
@@ -726,9 +724,7 @@ export function MobileLayout() {
                  -------------------------------------- */}
               {activeTab === 'communication' && (
                 <CommunicationModule 
-                  onNotificationCountChange={setNotifications} 
-                  isStandalone={true}
-                  onCloseStandalone={() => setActiveTab('home')}
+                  onActiveTabChange={setActiveTab}
                 />
               )}
 
@@ -1269,7 +1265,6 @@ export function MobileLayout() {
         >
           <div className="pb-8 max-h-[75vh] overflow-y-auto">
             <NotificationSystem 
-              currentRole={currentRole}
               onActiveTabChange={setActiveTab}
               onClose={() => setIsNotificationsOpen(false)}
             />
