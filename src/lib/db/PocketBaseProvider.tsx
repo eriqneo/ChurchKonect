@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type PocketBase from 'pocketbase';
 import type { RecordModel } from 'pocketbase';
-import { db, generateUUID } from './churchConnectDB';
+import { db } from './churchConnectDB';
 import { initialsForName, normalizeRoleId } from '../auth/roles';
 import { isPocketBaseConfigured, pb } from '../pocketbase/client';
+import { recordAuditEvent } from './auditEvents';
 
 export interface AuthUser {
   id: string;
@@ -47,21 +48,6 @@ function toAuthUser(record: RecordModel | null): AuthUser | null {
     status: typeof record.status === 'string' ? record.status : 'active',
     verified: Boolean(record.verified)
   };
-}
-
-async function writeLocalAudit(user: AuthUser, action: string, details: string): Promise<void> {
-  try {
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: user.id,
-      userName: user.name,
-      action,
-      details,
-      createdAt: new Date().toISOString()
-    });
-  } catch (error) {
-    console.warn('[Auth] Local audit write failed:', error);
-  }
 }
 
 async function clearLegacyIdentity(): Promise<void> {
@@ -121,7 +107,11 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
       if (!authUser) throw new Error('PocketBase returned an invalid user record.');
 
       await clearLegacyIdentity();
-      await writeLocalAudit(authUser, 'user_login', `${authUser.name} authenticated with PocketBase`);
+      await recordAuditEvent(pb, authUser, {
+        action: 'user_login',
+        summary: 'Signed in to ChurchConnect.',
+        entityType: 'session'
+      });
       setUser(authUser);
       return authUser;
     } finally {
@@ -133,7 +123,11 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
     setIsLoading(true);
     try {
       if (user) {
-        await writeLocalAudit(user, 'user_logout', `${user.name} logged out`);
+        await recordAuditEvent(pb, user, {
+          action: 'user_logout',
+          summary: 'Signed out of ChurchConnect.',
+          entityType: 'session'
+        });
       }
       pb.authStore.clear();
       await clearLegacyIdentity();
@@ -143,7 +137,7 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
         db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports,
         db.trainings, db.trainingSessions, db.trainingEnrollments,
         db.trainingAttendance, db.trainingCertificates, db.announcements,
-        db.notifications
+        db.notifications, db.auditLogs, db.feedback
       ], async () => {
         await Promise.all([
           db.members.filter((record) => Boolean(record.remoteId)).delete(),
@@ -160,7 +154,9 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
           db.trainingAttendance.filter((record) => record.syncStatus === 'synced').delete(),
           db.trainingCertificates.filter((record) => record.syncStatus === 'synced').delete(),
           db.announcements.filter((record) => record.syncStatus === 'synced').delete(),
-          db.notifications.filter((record) => Boolean(record.cacheOwnerId)).delete()
+          db.notifications.filter((record) => Boolean(record.cacheOwnerId)).delete(),
+          db.auditLogs.filter((record) => Boolean(record.cacheOwnerId)).delete(),
+          db.feedback.filter((record) => Boolean(record.cacheOwnerId)).delete()
         ]);
       });
       if ('clearAppBadge' in navigator) {

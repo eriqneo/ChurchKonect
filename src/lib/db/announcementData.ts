@@ -9,6 +9,7 @@ import {
   type AnnouncementRecord
 } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { recordAuditEvent } from './auditEvents';
 
 export interface AnnouncementView extends Omit<AnnouncementRecord, 'id'> {
   id: string;
@@ -236,6 +237,9 @@ export function useAnnouncementsData() {
         throw conflict;
       }
       const record = await pb.collection('announcements').update(existing.id, payload(fields, existing), { expand: 'createdBy' });
+      await recordAuditEvent(pb, user, {
+        action: 'announcement_updated', summary: `Updated announcement “${record.title}”.`, entityType: 'announcement', entityId: record.id
+      });
       await cacheConfirmed(mapAnnouncement(record, user.id));
       return record;
     }
@@ -246,6 +250,9 @@ export function useAnnouncementsData() {
       authorName: user.name,
       authorRole: user.role
     }, { expand: 'createdBy' });
+    await recordAuditEvent(pb, user, {
+      action: 'announcement_created', summary: `Published announcement “${record.title}”.`, entityType: 'announcement', entityId: record.id
+    });
     await cacheConfirmed(mapAnnouncement(record, user.id));
     return record;
   }, [pb, user]);
@@ -254,6 +261,9 @@ export function useAnnouncementsData() {
     if (!user) throw new Error('Sign in to manage announcements.');
     requireConnection();
     await pb.collection('announcements').update(announcement.id, { status: 'archived' });
+    await recordAuditEvent(pb, user, {
+      action: 'announcement_archived', summary: `Archived announcement “${announcement.title}”.`, entityType: 'announcement', entityId: announcement.id
+    });
     await db.announcements.where('localId').equals(announcement.id).delete();
   }, [pb, user]);
 
@@ -261,6 +271,9 @@ export function useAnnouncementsData() {
     if (!user) throw new Error('Sign in to manage announcements.');
     requireConnection();
     const record = await pb.collection('announcements').update(announcement.id, { pinned }, { expand: 'createdBy' });
+    await recordAuditEvent(pb, user, {
+      action: 'announcement_pin_changed', summary: `${pinned ? 'Pinned' : 'Unpinned'} announcement “${record.title}”.`, entityType: 'announcement', entityId: record.id
+    });
     await cacheConfirmed(mapAnnouncement(record, user.id));
   }, [pb, user]);
 

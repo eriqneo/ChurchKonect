@@ -72,8 +72,7 @@ class SyncEngine {
     try {
       // Tables that track syncStatus
       const syncableTables = [
-        db.members,
-        db.feedback
+        db.members
       ];
 
       for (const table of syncableTables) {
@@ -123,8 +122,7 @@ class SyncEngine {
 
     try {
       const tablesToSync = [
-        { table: db.members, name: 'Members' },
-        { table: db.feedback, name: 'Feedback' }
+        { table: db.members, name: 'Members' }
       ];
 
       let processed = 0;

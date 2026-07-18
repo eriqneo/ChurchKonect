@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { useGovernanceData, type FeedbackStatus, type FeedbackType } from '../../lib/db/governanceData';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
 import { 
@@ -36,7 +38,11 @@ import {
   Smartphone,
   LogOut,
   Compass,
-  GraduationCap
+  GraduationCap,
+  Activity,
+  MessageSquareText,
+  RefreshCw,
+  Send
 } from 'lucide-react';
 
 interface ProfileData {
@@ -59,6 +65,8 @@ interface ProfileModuleProps {
 export function ProfileModule({ currentRole: passedRole, setActiveTab }: ProfileModuleProps) {
   const { theme, toggleTheme, isDark } = useTheme();
   const toast = useToast();
+  const { logout } = useAuth();
+  const governance = useGovernanceData();
   
   // Get active system user & role
   const { user: currentUser, role: userRole } = useCurrentUser();
@@ -84,6 +92,13 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const [showQRFullscreen, setShowQRFullscreen] = useState(false);
   const [showEditSheet, setShowEditSheet] = useState(false);
   const [showSignOutSheet, setShowSignOutSheet] = useState(false);
+  const [showGovernanceSheet, setShowGovernanceSheet] = useState(false);
+  const [governanceTab, setGovernanceTab] = useState<'feedback' | 'activity'>('feedback');
+  const [feedbackType, setFeedbackType] = useState<FeedbackType>('support');
+  const [feedbackContent, setFeedbackContent] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [reviewResponses, setReviewResponses] = useState<Record<string, string>>({});
+  const [reviewingFeedbackId, setReviewingFeedbackId] = useState<string | null>(null);
 
   // Preference toggles
   const [privacyOn, setPrivacyOn] = useState(true);
@@ -262,6 +277,37 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   // PWA Install Prompt simulation
   const handleInstallApp = () => {
     toast.success('PWA Install Triggered: Choose Add to Home Screen in your browser!');
+  };
+
+  const handleSubmitFeedback = async () => {
+    setIsSubmittingFeedback(true);
+    try {
+      await governance.submitFeedback(feedbackType, feedbackContent);
+      setFeedbackContent('');
+      toast.success('Your request was sent securely.');
+    } catch (error) {
+      toast.error(governance.messageFor(error));
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
+
+  const handleReviewFeedback = async (feedbackId: string, status: Exclude<FeedbackStatus, 'new'>) => {
+    setReviewingFeedbackId(feedbackId);
+    try {
+      await governance.reviewFeedback(feedbackId, status, reviewResponses[feedbackId] || '');
+      toast.success(status === 'resolved' ? 'Request resolved.' : 'Request moved to review.');
+    } catch (error) {
+      toast.error(governance.messageFor(error));
+    } finally {
+      setReviewingFeedbackId(null);
+    }
+  };
+
+  const formatGovernanceTime = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   };
 
   const isWorkerRole = ['cell_leader', 'department_head', 'worker'].includes(currentRole?.id?.toLowerCase());
@@ -616,6 +662,18 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
                   }
                 />
 
+                <SettingsRow
+                  icon={<MessageSquareText className="w-4.5 h-4.5 text-white" />}
+                  iconColor="bg-violet-500"
+                  label={governance.isManager ? 'Support & activity' : 'Help & feedback'}
+                  onPress={() => setShowGovernanceSheet(true)}
+                  trailing={governance.isManager && governance.feedback.some((item) => item.status === 'new') ? (
+                    <span className="min-w-5 h-5 px-1.5 rounded-full bg-cathedral-600 text-white text-[10px] font-black flex items-center justify-center">
+                      {governance.feedback.filter((item) => item.status === 'new').length}
+                    </span>
+                  ) : undefined}
+                />
+
                 {/* About Settings Row */}
                 <SettingsRow
                   icon={<Info className="w-4.5 h-4.5 text-white" />}
@@ -788,6 +846,186 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
       </BottomSheet>
 
       {/* ==========================================================
+          SUPPORT, FEEDBACK & OPERATIONAL ACTIVITY
+          ========================================================== */}
+      <BottomSheet
+        isOpen={showGovernanceSheet}
+        onClose={() => setShowGovernanceSheet(false)}
+        title={governance.isManager ? 'Support & Activity' : 'Help & Feedback'}
+        detents={['full']}
+      >
+        <div className="space-y-4 pb-8 text-left">
+          <div className="flex items-center gap-2 p-1 rounded-pill bg-surface-200">
+            {(['feedback', 'activity'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setGovernanceTab(tab)}
+                className={`flex-1 py-2 rounded-pill text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer ${
+                  governanceTab === tab ? 'bg-gold-500 text-black shadow-sm' : 'text-text-secondary'
+                }`}
+              >
+                {tab === 'feedback' ? (governance.isManager ? 'Support Queue' : 'My Requests') : 'Activity'}
+              </button>
+            ))}
+          </div>
+
+          {governance.error && (
+            <div className="rounded-card border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              {governance.error}
+            </div>
+          )}
+
+          <button
+            onClick={() => void governance.refresh()}
+            disabled={governance.isRefreshing}
+            className="ml-auto flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-text-muted hover:text-text-primary disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${governance.isRefreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+
+          {governanceTab === 'feedback' ? (
+            <>
+              <GlassCard variant="solid" className="space-y-3 p-4">
+                <div>
+                  <span className={`${Typography.OVERLINE} text-gold-600 block`}>Contact the team</span>
+                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+                    Send a support request, report a problem, or suggest an improvement. Only you and authorized leadership can read it.
+                  </p>
+                </div>
+                <select
+                  value={feedbackType}
+                  onChange={(event) => setFeedbackType(event.target.value as FeedbackType)}
+                  className="w-full p-3 rounded-card bg-surface-200 text-sm border border-theme-border text-text-primary outline-none focus:ring-2 focus:ring-gold-500/30"
+                >
+                  <option value="support">Support request</option>
+                  <option value="bug">Report a problem</option>
+                  <option value="suggestion">Suggest an improvement</option>
+                  <option value="other">Other</option>
+                </select>
+                <textarea
+                  value={feedbackContent}
+                  onChange={(event) => setFeedbackContent(event.target.value)}
+                  maxLength={2000}
+                  rows={4}
+                  placeholder="Describe what happened or how we can help…"
+                  className="w-full resize-none p-3 rounded-card bg-surface-200 text-sm border border-theme-border text-text-primary placeholder:text-text-muted outline-none focus:ring-2 focus:ring-gold-500/30"
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] text-text-muted">{feedbackContent.length}/2000</span>
+                  <button
+                    onClick={() => void handleSubmitFeedback()}
+                    disabled={isSubmittingFeedback || feedbackContent.trim().length < 10}
+                    className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-pill bg-gold-500 text-black text-xs font-black disabled:opacity-45 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {isSubmittingFeedback ? 'Sending…' : 'Send securely'}
+                  </button>
+                </div>
+              </GlassCard>
+
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className={`${Typography.OVERLINE} text-text-muted`}>
+                    {governance.isManager ? 'Recent requests' : 'Request history'}
+                  </span>
+                  <span className="text-[10px] font-mono text-text-muted">{governance.feedback.length}</span>
+                </div>
+                {governance.feedback.length === 0 ? (
+                  <GlassCard variant="solid" className="py-8 text-center">
+                    <MessageSquareText className="w-7 h-7 mx-auto text-text-muted mb-2" />
+                    <p className="text-xs font-bold text-text-primary">No support requests yet</p>
+                    <p className="text-[11px] text-text-muted mt-1">New requests will appear here after the server confirms them.</p>
+                  </GlassCard>
+                ) : governance.feedback.map((item) => (
+                  <GlassCard key={item.localId} variant="solid" className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-extrabold text-text-primary capitalize">{item.type.replace('_', ' ')}</p>
+                        {governance.isManager && <p className="text-[10px] text-text-muted mt-0.5">{item.memberName}</p>}
+                      </div>
+                      <AccentBadge
+                        label={item.status === 'new' ? 'NEW' : item.status === 'reviewing' ? 'REVIEWING' : 'RESOLVED'}
+                        variant={item.status === 'resolved' ? 'sage' : item.status === 'reviewing' ? 'gold' : 'cathedral'}
+                        size="sm"
+                      />
+                    </div>
+                    <p className="text-xs leading-relaxed text-text-secondary whitespace-pre-wrap">{item.content}</p>
+                    <p className="text-[10px] text-text-muted">{formatGovernanceTime(item.createdAt)}</p>
+                    {item.response && (
+                      <div className="rounded-card bg-sage-50 dark:bg-sage-500/10 border border-sage-500/20 p-3">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-sage-700 dark:text-sage-300">Leadership response</span>
+                        <p className="text-xs text-text-secondary mt-1 whitespace-pre-wrap">{item.response}</p>
+                      </div>
+                    )}
+                    {governance.isManager && item.status !== 'resolved' && (
+                      <div className="space-y-2 pt-1 border-t border-theme-border">
+                        <textarea
+                          value={reviewResponses[item.localId] ?? item.response ?? ''}
+                          onChange={(event) => setReviewResponses((current) => ({ ...current, [item.localId]: event.target.value }))}
+                          maxLength={2000}
+                          rows={2}
+                          placeholder="Add a response for the member…"
+                          className="w-full resize-none p-3 rounded-card bg-surface-200 text-xs border border-theme-border text-text-primary placeholder:text-text-muted outline-none"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => void handleReviewFeedback(item.localId, 'reviewing')}
+                            disabled={reviewingFeedbackId === item.localId}
+                            className="py-2 rounded-pill bg-surface-200 text-text-primary text-[11px] font-bold disabled:opacity-50 cursor-pointer"
+                          >
+                            Mark reviewing
+                          </button>
+                          <button
+                            onClick={() => void handleReviewFeedback(item.localId, 'resolved')}
+                            disabled={reviewingFeedbackId === item.localId}
+                            className="py-2 rounded-pill bg-sage-600 text-white text-[11px] font-black disabled:opacity-50 cursor-pointer"
+                          >
+                            Resolve
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </GlassCard>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2.5">
+              <div className="px-1">
+                <span className={`${Typography.OVERLINE} text-text-muted`}>
+                  {governance.isManager ? 'Operational history' : 'My recent activity'}
+                </span>
+                <p className="text-[11px] text-text-muted mt-1">
+                  Append-only records of confirmed app actions. PocketBase server logs remain the forensic source of truth.
+                </p>
+              </div>
+              {governance.auditLogs.length === 0 ? (
+                <GlassCard variant="solid" className="py-8 text-center">
+                  <Activity className="w-7 h-7 mx-auto text-text-muted mb-2" />
+                  <p className="text-xs font-bold text-text-primary">No activity records yet</p>
+                </GlassCard>
+              ) : governance.auditLogs.map((item) => (
+                <GlassCard key={item.localId} variant="solid" className="p-3.5 flex gap-3">
+                  <div className="w-9 h-9 shrink-0 rounded-full bg-gold-100 dark:bg-gold-500/15 text-gold-700 dark:text-gold-400 flex items-center justify-center">
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-extrabold text-text-primary">{item.action.replaceAll('_', ' ')}</p>
+                      <span className="text-[9px] text-text-muted shrink-0">{formatGovernanceTime(item.createdAt)}</span>
+                    </div>
+                    {governance.isManager && <p className="text-[10px] text-gold-700 dark:text-gold-400 mt-0.5">{item.userName}</p>}
+                    <p className="text-[11px] leading-relaxed text-text-secondary mt-1">{item.details}</p>
+                  </div>
+                </GlassCard>
+              ))}
+            </div>
+          )}
+        </div>
+      </BottomSheet>
+
+      {/* ==========================================================
           SIGN OUT CONFIRMATION BOTTOM SHEET
           ========================================================== */}
       <BottomSheet
@@ -802,7 +1040,10 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
 
           <div className="grid grid-cols-2 gap-2 pt-2">
             <button
-              onClick={() => { setShowSignOutSheet(false); toast.success('Signed out of ChurchConnect (Simulated)'); }}
+              onClick={async () => {
+                setShowSignOutSheet(false);
+                await logout();
+              }}
               className="py-2.5 rounded-pill bg-cathedral-700 text-white font-black text-xs uppercase tracking-wider cursor-pointer hover:bg-cathedral-800 transition-colors"
             >
               Yes, Sign Out

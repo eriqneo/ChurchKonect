@@ -4,6 +4,7 @@ import { ShieldAlert, Lock, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useToast } from './toast/useToast';
 import { GlassCard } from './index';
+import { useGovernanceData } from '../../lib/db/governanceData';
 
 interface AccessRestrictedProps {
   requiredRole: string;
@@ -13,9 +14,15 @@ interface AccessRestrictedProps {
 export function AccessRestricted({ requiredRole, onGoBack }: AccessRestrictedProps) {
   const { user } = useAuth();
   const toast = useToast();
+  const governance = useGovernanceData();
 
-  const handleReportError = () => {
-    toast.info('Access request logged. Clergy section notified.');
+  const handleReportError = async () => {
+    try {
+      await governance.submitFeedback('support', `Please review my access to the ${requiredRole} area. The app showed an access restricted screen.`);
+      toast.success('Your access question was sent to church leadership.');
+    } catch (error) {
+      toast.error(governance.messageFor(error));
+    }
   };
 
   const getFriendlyRoleName = (roleId: string) => {
@@ -84,7 +91,7 @@ export function AccessRestricted({ requiredRole, onGoBack }: AccessRestrictedPro
 
           {/* Report this text link */}
           <button
-            onClick={handleReportError}
+            onClick={() => void handleReportError()}
             className="text-[10px] text-text-muted hover:text-gold-500 underline cursor-pointer bg-transparent border-0 font-medium"
           >
             Report error with clearance

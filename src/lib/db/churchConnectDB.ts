@@ -255,18 +255,29 @@ export interface NotificationRecord {
 export interface AuditLogRecord {
   id?: number;
   localId: string;
+  remoteId?: string;
   userId: string;
   userName: string;
   action: string;
   details: string;
+  entityType?: string;
+  entityId?: string;
+  source?: 'client';
+  operationId?: string;
+  cacheOwnerId?: string;
   createdAt: string;
 }
 
 export interface FeedbackRecord extends LocalFirstRecord {
   memberId: string;
   memberName: string;
-  type: string;
+  type: 'bug' | 'suggestion' | 'support' | 'other';
   content: string;
+  status: 'new' | 'reviewing' | 'resolved';
+  response?: string;
+  assignedTo?: string;
+  reviewedAt?: string;
+  cacheOwnerId?: string;
 }
 
 export interface AppSettingsRecord {
@@ -352,6 +363,11 @@ export class ChurchConnectDB extends Dexie {
 
     this.version(5).stores({
       notifications: '++id, &localId, userId, type, isRead, dismissed, createdAt, cacheOwnerId, receiptSyncStatus'
+    });
+
+    this.version(6).stores({
+      auditLogs: '++id, &localId, remoteId, userId, action, createdAt, cacheOwnerId',
+      feedback: '++id, &localId, remoteId, memberId, type, status, syncStatus, cacheOwnerId, createdAt'
     });
   }
 }

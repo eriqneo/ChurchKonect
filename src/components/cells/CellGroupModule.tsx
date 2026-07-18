@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as Typography from '../../lib/theme/typography';
 import { 
-  db, 
-  generateUUID
+  db
 } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
 import { useCellOperations } from '../../lib/db/cellOperations';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { sendCellReportReminder } from '../../lib/db/notificationData';
+import { recordAuditEvent } from '../../lib/db/auditEvents';
 import {
   GlassCard,
   AccentBadge,
@@ -317,14 +317,11 @@ export function CellGroupModule() {
       });
       showToast(`${member.fullName} removed from cell group roster.`);
       
-      // Auto Audit Log
-      await db.auditLogs.add({
-        localId: generateUUID(),
-        userId: user.localId,
-        userName: user.name,
-        action: 'cell_member_remove',
-        details: `Removed ${member.fullName} from cell group roster.`,
-        createdAt: new Date().toISOString()
+      if (authUser) await recordAuditEvent(pb, authUser, {
+        action: 'cell_member_removed',
+        summary: `Removed ${member.fullName} from a fellowship roster.`,
+        entityType: 'member',
+        entityId: member.remoteId
       });
     } catch (error) {
       console.error('[Cells] Remove roster member failed:', error);
@@ -354,7 +351,6 @@ export function CellGroupModule() {
     triggerHaptic(25);
 
     setIsSavingAssignments(true);
-    const nowStr = new Date().toISOString();
     try {
       const results = await Promise.allSettled(selectedMemberIdsForAssign.map((memberId) =>
         updateMember(memberId, {
@@ -369,14 +365,11 @@ export function CellGroupModule() {
         ? `${assignedCount} assigned; ${failedCount} need another attempt.`
         : `Successfully assigned ${assignedCount} members to "${selectedCellForDetail.name}"!`);
     
-      // Local audit remains informational until the audit-log backend module.
-      await db.auditLogs.add({
-        localId: generateUUID(),
-        userId: user.localId,
-        userName: user.name,
-        action: 'cell_members_assign',
-        details: `Assigned ${assignedCount} members to cell group ${selectedCellForDetail.name}.`,
-        createdAt: nowStr
+      if (authUser && assignedCount) await recordAuditEvent(pb, authUser, {
+        action: 'cell_members_assigned',
+        summary: `Assigned ${assignedCount} member${assignedCount === 1 ? '' : 's'} to ${selectedCellForDetail.name}.`,
+        entityType: 'cell_group',
+        entityId: selectedCellForDetail.remoteId
       });
 
       const failedIds = selectedMemberIdsForAssign.filter((_, index) => results[index].status === 'rejected');
@@ -670,6 +663,12 @@ export function CellGroupModule() {
     }
     try {
       await sendCellReportReminder(pb, authUser.id, cellGroup.leaderId, cellGroup.localId, cellGroup.name);
+      await recordAuditEvent(pb, authUser, {
+        action: 'cell_report_reminder_sent',
+        summary: `Sent the weekly report reminder for ${cellGroup.name}.`,
+        entityType: 'cell_group',
+        entityId: cellGroup.localId
+      });
       showToast(`Weekly report reminder sent to ${leaderName}.`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'The reminder could not be sent.');

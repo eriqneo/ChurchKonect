@@ -10,6 +10,7 @@ import {
   type SectionRecord
 } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { recordAuditEvent } from './auditEvents';
 
 export interface PocketBaseMember {
   id?: number;
@@ -358,6 +359,11 @@ export function useChurchStructure() {
     } else {
       record = await pb.collection('cell_groups').create(payload, { expand: 'leader,leaderMember,section' });
     }
+    await recordAuditEvent(pb, user, {
+      action: fields.remoteId ? 'cell_group_updated' : 'cell_group_created',
+      summary: `${fields.remoteId ? 'Updated' : 'Created'} fellowship ${record.name}.`,
+      entityType: 'cell_group', entityId: record.id
+    });
     await refresh();
     return mapRemoteCellGroup(record, user.id);
   }, [pb, refresh, user]);
@@ -386,6 +392,11 @@ export function useChurchStructure() {
     const record = fields.remoteId
       ? await pb.collection('sections').update(fields.remoteId, payload, { expand: 'pastor,pastorMember' })
       : await pb.collection('sections').create(payload, { expand: 'pastor,pastorMember' });
+    await recordAuditEvent(pb, user, {
+      action: fields.remoteId ? 'section_updated' : 'section_created',
+      summary: `${fields.remoteId ? 'Updated' : 'Created'} section ${record.name}.`,
+      entityType: 'section', entityId: record.id
+    });
     await refresh();
     return record;
   }, [pb, refresh, user]);
@@ -414,6 +425,11 @@ export function useChurchStructure() {
     const record = fields.remoteId
       ? await pb.collection('departments').update(fields.remoteId, payload, { expand: 'head,headMember' })
       : await pb.collection('departments').create(payload, { expand: 'head,headMember' });
+    await recordAuditEvent(pb, user, {
+      action: fields.remoteId ? 'department_updated' : 'department_created',
+      summary: `${fields.remoteId ? 'Updated' : 'Created'} department ${record.name}.`,
+      entityType: 'department', entityId: record.id
+    });
     await refresh();
     return record;
   }, [pb, refresh, user]);
@@ -542,6 +558,11 @@ export function usePocketBaseMembers() {
       deleted: false,
       createdBy: user.id
     }, { expand: 'departments,cellGroup,section' });
+    await recordAuditEvent(pb, user, {
+      action: 'member_enrolled',
+      summary: `Enrolled ${record.fullName} in the member registry.`,
+      entityType: 'member', entityId: record.id
+    });
     await refreshMembers();
     return mapRemoteMember(record, user.id);
   }, [pb, refreshMembers, user]);
@@ -571,15 +592,23 @@ export function usePocketBaseMembers() {
     if (updates.status !== undefined) payload.status = updates.status.toLowerCase();
 
     const record = await pb.collection('members').update(remoteId, payload, { expand: 'departments,cellGroup,section' });
+    if (user) await recordAuditEvent(pb, user, {
+      action: 'member_updated',
+      summary: `Updated the registry profile for ${record.fullName}.`,
+      entityType: 'member', entityId: remoteId
+    });
     if (options.refresh !== false) await refreshMembers();
     return mapRemoteMember(record, user?.id ?? '');
-  }, [pb, refreshMembers, user?.id]);
+  }, [pb, refreshMembers, user]);
 
   const deleteMember = useCallback(async (remoteId: string) => {
     await pb.collection('members').update(remoteId, { status: 'inactive', deleted: true });
+    if (user) await recordAuditEvent(pb, user, {
+      action: 'member_archived', summary: 'Archived a member registry profile.', entityType: 'member', entityId: remoteId
+    });
     await refreshMembers();
     return true;
-  }, [pb, refreshMembers]);
+  }, [pb, refreshMembers, user]);
 
   const resetPassword = useCallback(async (remoteId: string) => {
     const existing = members.find((member) => member.remoteId === remoteId || member.localId === remoteId);
@@ -587,8 +616,11 @@ export function usePocketBaseMembers() {
       throw new Error('This registry profile is not linked to a login account.');
     }
     await pb.collection('users').requestPasswordReset(existing.email);
+    if (user) await recordAuditEvent(pb, user, {
+      action: 'password_reset_requested', summary: 'Requested a password reset for a linked member account.', entityType: 'member', entityId: remoteId
+    });
     return { email: existing.email, fullName: existing.fullName, delivery: 'email' as const };
-  }, [members, pb]);
+  }, [members, pb, user]);
 
   return {
     members,

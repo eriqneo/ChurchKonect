@@ -13,6 +13,7 @@ import {
   type TrainingSessionRecord
 } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { recordAuditEvent } from './auditEvents';
 
 let processingPromise: Promise<void> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -292,6 +293,9 @@ export function useTrainingData() {
       ));
       await Promise.all(createdSessions.map((session) => cacheConfirmed(db.trainingSessions, mapSession(session, user.id))));
     }
+    await recordAuditEvent(pb, user, {
+      action: 'academy_course_created', summary: `Created Academy course “${course.title}”.`, entityType: 'training', entityId: course.id
+    });
     await refreshTrainingData(pb, user.id).catch(() => undefined);
     return course;
   }, [pb, user]);
@@ -308,6 +312,9 @@ export function useTrainingData() {
       status: 'enrolled', enrolledAt: now, enrolledBy: user.id
     });
     const mapped = mapEnrollment(record, user.id);
+    await recordAuditEvent(pb, user, {
+      action: 'academy_member_enrolled', summary: 'Enrolled a member in an Academy course.', entityType: 'training_enrollment', entityId: record.id
+    });
     await cacheConfirmed(db.trainingEnrollments, mapped);
     await refreshTrainingData(pb, user.id).catch(() => undefined);
     return mapped;
@@ -337,6 +344,9 @@ export function useTrainingData() {
     if (!user) throw new Error('Sign in to manage Academy sessions.');
     requireConnection();
     const record = await pb.collection('training_sessions').update(sessionId, { status: occurred ? 'completed' : 'scheduled' });
+    await recordAuditEvent(pb, user, {
+      action: 'academy_session_updated', summary: `Marked an Academy session as ${record.status}.`, entityType: 'training_session', entityId: sessionId
+    });
     await cacheConfirmed(db.trainingSessions, mapSession(record, user.id));
     await refreshTrainingData(pb, user.id).catch(() => undefined);
   }, [pb, user]);
@@ -353,6 +363,9 @@ export function useTrainingData() {
       status: verified ? 'verified' : 'pending', attendanceRate, issuedAt: now,
       requestedBy: user.id, verifiedBy: verified ? user.id : '', verifiedAt: verified ? now : ''
     });
+    await recordAuditEvent(pb, user, {
+      action: 'academy_certificate_issued', summary: `Issued an Academy certificate request${verified ? ' and verified it' : ''}.`, entityType: 'training_certificate', entityId: record.id
+    });
     await cacheConfirmed(db.trainingCertificates, mapCertificate(record, user.id));
     await refreshTrainingData(pb, user.id).catch(() => undefined);
     return record;
@@ -363,6 +376,9 @@ export function useTrainingData() {
     requireConnection();
     const now = new Date().toISOString();
     const record = await pb.collection('training_certificates').update(certificateId, { status: 'verified', verifiedBy: user.id, verifiedAt: now }, { expand: 'verifiedBy' });
+    await recordAuditEvent(pb, user, {
+      action: 'academy_certificate_verified', summary: 'Verified an Academy certificate.', entityType: 'training_certificate', entityId: certificateId
+    });
     await cacheConfirmed(db.trainingCertificates, mapCertificate(record, user.id));
     await refreshTrainingData(pb, user.id).catch(() => undefined);
   }, [pb, user]);

@@ -3,9 +3,10 @@
 ChurchConnect is a mobile-first church administration PWA for members, cell groups, training,
 prayer coordination, announcements, and reporting.
 
-The frontend is a React/Vite application with Dexie-backed local persistence. PocketBase currently
-provides production authentication, the member registry, church/cell structures, and local-first
-cell operations. Remaining modules are being connected incrementally and tested before moving on.
+The frontend is a React/Vite application with scoped Dexie persistence. PocketBase provides
+production authentication, member and cell administration, local-first cell operations, Academy,
+announcements, prayer coordination, aggregate reports, notifications, feedback, and operational
+activity history. Each backend module is reconciled and authorization-tested before work moves on.
 
 ## Local development
 
@@ -247,3 +248,30 @@ npm run backend:bootstrap-notifications -- --email=YOUR_SUPERUSER_EMAIL --transp
 ```
 
 The versioned schema is in `pb_migrations/202607182345_create_notifications.js`.
+
+## Audit Logs and Feedback
+
+`feedback` stores private support requests, problem reports, and suggestions. Members can create
+and read only their own requests. Administrators and the Lead Pastor can review the shared queue,
+add a response, and move a request through new, reviewing, and resolved states. The submitter,
+original type, content, and submission timestamp are immutable, and app clients cannot hard-delete
+requests. The profile support sheet and app error/access-reporting paths use this same collection.
+
+`audit_logs` is an append-only operational history with server-enforced actor identity. Members see
+their own recent actions; Administrators and the Lead Pastor can inspect the leadership activity
+view. Successful actions in authentication, registry/structure management, cell operations,
+Academy, announcements, prayer coordination, support review, and report reminders emit concise
+events without storing prayer text or support content in the log. A rolling 100-record cache is
+scoped to the signed-in account and purged on logout.
+
+This activity history is useful for operations but does not replace PocketBase server logs for a
+forensic or regulatory audit, because browser clients originate these events.
+
+To reconcile both collections and run disposable spoofing, ownership, immutability, leadership,
+hard-delete, and anonymous-access tests:
+
+```bash
+npm run backend:bootstrap-governance -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607190030_create_governance.js`.

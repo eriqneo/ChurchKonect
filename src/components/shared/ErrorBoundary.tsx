@@ -2,6 +2,8 @@ import React, { ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import * as Typography from '../../lib/theme/typography';
 import { motion } from 'motion/react';
+import { pb } from '../../lib/pocketbase/client';
+import { generatePocketBaseId } from '../../lib/db/churchConnectDB';
 
 interface Props {
   children: ReactNode;
@@ -11,17 +13,19 @@ interface State {
   hasError: boolean;
   error: Error | null;
   showDetails: boolean;
+  issueStatus: string;
 }
 
 export class ErrorBoundary extends React.Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
-    showDetails: false
+    showDetails: false,
+    issueStatus: ''
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, showDetails: false };
+    return { hasError: true, error, showDetails: false, issueStatus: '' };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -32,9 +36,32 @@ export class ErrorBoundary extends React.Component<Props, State> {
     window.location.reload();
   };
 
-  private handleReportIssue = () => {
-    // Elegant toast or log for issue report in preview environment
-    alert(`Issue reported: ${this.state.error?.message || 'Unknown error'}`);
+  private handleReportIssue = async () => {
+    const user = pb.authStore.record;
+    if (!pb.authStore.isValid || !user) {
+      this.setState({ issueStatus: 'Sign in again before sending this report.' });
+      return;
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      this.setState({ issueStatus: 'Connect to the internet, then try sending the report again.' });
+      return;
+    }
+    this.setState({ issueStatus: 'Sending report…' });
+    try {
+      await pb.collection('feedback').create({
+        id: generatePocketBaseId(),
+        submitter: user.id,
+        submitterName: user.name || user.email,
+        type: 'bug',
+        content: `Unexpected application error: ${(this.state.error?.message || 'Unknown error').slice(0, 1800)}`,
+        status: 'new',
+        response: '',
+        assignedTo: ''
+      });
+      this.setState({ issueStatus: 'Report sent securely. Thank you.' });
+    } catch {
+      this.setState({ issueStatus: 'The report could not be sent. Please try again after reloading.' });
+    }
   };
 
   private toggleDetails = () => {
@@ -100,11 +127,14 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
             {/* Report Issue text link */}
             <button
-              onClick={this.handleReportIssue}
+              onClick={() => void this.handleReportIssue()}
               className={`${Typography.CAPTION} mt-4 text-text-muted hover:text-gold-400 underline cursor-pointer bg-transparent border-0 focus:outline-none`}
             >
               Report Issue
             </button>
+            {this.state.issueStatus && (
+              <p className="mt-2 text-[11px] text-text-muted" role="status">{this.state.issueStatus}</p>
+            )}
           </div>
         </div>
       );

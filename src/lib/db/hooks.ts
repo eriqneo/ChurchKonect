@@ -14,13 +14,12 @@ import {
   type TrainingSessionRecord,
   type TrainingAttendanceRecord,
   type TrainingCertificateRecord,
-  type AuditLogRecord,
-  type UserRecord,
-  type FeedbackRecord
+  type UserRecord
 } from './churchConnectDB';
 import { syncEngine, type SyncProgress } from './SyncEngine';
 import { useAuth } from './PocketBaseProvider';
 import { getRoleView } from '../auth/roles';
+import { recordAuditEvent } from './auditEvents';
 
 // Helper to trigger background sync when modifications happen
 const triggerAutoSync = () => {
@@ -70,15 +69,6 @@ export function useMembers() {
     });
 
     await db.members.add(newMember);
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: 'current-user',
-      userName: 'System User',
-      action: 'member_add',
-      details: `Added new member: ${fields.fullName}`,
-      createdAt: new Date().toISOString()
-    });
-
     triggerAutoSync();
     return newMember;
   }, []);
@@ -105,15 +95,6 @@ export function useMembers() {
       deletedAt: new Date().toISOString(),
       syncStatus: 'pending',
       updatedAt: new Date().toISOString()
-    });
-
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: 'current-user',
-      userName: 'System User',
-      action: 'member_delete',
-      details: `Soft deleted member: ${existing.fullName}`,
-      createdAt: new Date().toISOString()
     });
 
     triggerAutoSync();
@@ -420,16 +401,6 @@ export function useReports(roleId: string) {
       updatedAt: new Date().toISOString()
     });
 
-    // Create a clergy audit log
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: 'clergy-user',
-      userName: 'Clergy Supervisor',
-      action: 'report_approved',
-      details: `Approved cell group report with localId: ${reportId}`,
-      createdAt: new Date().toISOString()
-    });
-
     triggerAutoSync();
   }, []);
 
@@ -446,22 +417,16 @@ export function useReports(roleId: string) {
 // 8. useAuditLog() Hook
 // ==========================================
 export function useAuditLog() {
+  const { pb, user } = useAuth();
   const logs = useLiveQuery(async () => {
-    return await db.auditLogs
-      .reverse()
-      .sortBy('createdAt');
-  }, []);
+    if (!user) return [];
+    return db.auditLogs.where('cacheOwnerId').equals(user.id).reverse().sortBy('createdAt');
+  }, [user?.id]);
 
-  const addLog = useCallback(async (action: string, details: string, userId = 'current-user', userName = 'System User') => {
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId,
-      userName,
-      action,
-      details,
-      createdAt: new Date().toISOString()
-    });
-  }, []);
+  const addLog = useCallback(async (action: string, details: string) => {
+    if (!user) return;
+    await recordAuditEvent(pb, user, { action, summary: details });
+  }, [pb, user]);
 
   return {
     logs: logs || [],

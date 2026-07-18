@@ -137,6 +137,7 @@ This is stale-while-revalidate behavior, not full database replication.
 | Notifications | Server/realtime | Read cached recent notifications | Small rolling window |
 | Analytics | Server-derived | Show last refreshed snapshot with timestamp | Aggregates only |
 | Audit logs | Server append through commands/hooks | Queue only the audit event attached to an allowed offline command | Remove after acknowledgement |
+| Feedback/support | Server-first private workflow | Keep unsent text in the open form; do not claim submission | Account-scoped recent requests only |
 
 Sensitive data must never be cached merely because a generic collection helper caches every
 response. Every query declares its cache policy and retention explicitly.

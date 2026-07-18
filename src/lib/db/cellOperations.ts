@@ -13,6 +13,7 @@ import {
   type OutboxRecord
 } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { recordAuditEvent, type AuditEventInput } from './auditEvents';
 
 type AttendanceStatus = CellAttendanceRecord['status'];
 type ReportStatus = CellReportRecord['reportStatus'];
@@ -218,6 +219,15 @@ async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
     await db.outbox.update(item.id, { status: 'processing', attempts: item.attempts + 1, updatedAt: new Date().toISOString() });
     try {
       await processCommand(pb, item);
+      const actor = pb.authStore.record;
+      const auditByCommand: Partial<Record<OutboxRecord['command'], AuditEventInput>> = {
+        start_meeting: { action: 'cell_meeting_started', summary: 'Started a fellowship meeting.', entityType: 'cell_meeting', entityId: item.entityId },
+        add_visitor: { action: 'cell_visitor_added', summary: 'Added a visitor to a fellowship meeting.', entityType: 'cell_visitor', entityId: item.entityId },
+        submit_report: { action: 'cell_report_submitted', summary: 'Submitted a fellowship report for pastoral review.', entityType: 'cell_report', entityId: item.entityId },
+        review_report: { action: 'cell_report_reviewed', summary: 'Reviewed a fellowship report.', entityType: 'cell_report', entityId: item.entityId }
+      };
+      const audit = auditByCommand[item.command];
+      if (actor?.id === ownerId && audit) await recordAuditEvent(pb, { id: actor.id, name: actor.name || actor.email }, audit);
       await db.outbox.delete(item.id);
     } catch (error) {
       const transient = isTransient(error);

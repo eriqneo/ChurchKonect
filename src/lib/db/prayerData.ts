@@ -3,6 +3,7 @@ import type PocketBase from 'pocketbase';
 import type { RecordModel } from 'pocketbase';
 import { db, generatePocketBaseId } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { recordAuditEvent } from './auditEvents';
 
 export type PrayerStatus = 'submitted' | 'assigned' | 'answered' | 'sealed';
 export type PrayerUrgency = 'low' | 'medium' | 'high';
@@ -271,6 +272,9 @@ export function usePrayerData() {
         answeredAt: '',
         archivedAt: ''
       });
+      await recordAuditEvent(pb, user, {
+        action: 'prayer_submitted', summary: `Submitted a ${category} prayer request${isAnonymous ? ' anonymously' : ''}.`, entityType: 'prayer_request', entityId: request.id
+      });
       return request;
     });
   }, [pb, run, user]);
@@ -300,6 +304,9 @@ export function usePrayerData() {
           status: 'assigned'
         });
       }
+      await recordAuditEvent(pb, user, {
+        action: 'prayers_assigned', summary: `Assigned ${requestIds.length} prayer request${requestIds.length === 1 ? '' : 's'} to ${intercessors.length} intercessor${intercessors.length === 1 ? '' : 's'}.`, entityType: 'prayer_request'
+      });
     });
   }, [pb, run, user]);
 
@@ -309,7 +316,10 @@ export function usePrayerData() {
     for (const assignment of assignmentPage.items) {
       await pb.collection('prayer_assignments').update(assignment.id, { requestUrgency: urgency });
     }
-  }), [pb, run]);
+    if (user) await recordAuditEvent(pb, user, {
+      action: 'prayer_urgency_changed', summary: `Changed a prayer request urgency to ${urgency}.`, entityType: 'prayer_request', entityId: requestId
+    });
+  }), [pb, run, user]);
 
   const archivePrayers = useCallback((requestIds: string[]) => run(async () => {
     for (const requestId of requestIds) {
@@ -319,7 +329,10 @@ export function usePrayerData() {
       }
       await pb.collection('prayer_requests').update(requestId, { status: 'archived', archivedAt: new Date().toISOString() });
     }
-  }), [pb, run]);
+    if (user) await recordAuditEvent(pb, user, {
+      action: 'prayers_archived', summary: `Archived ${requestIds.length} prayer request${requestIds.length === 1 ? '' : 's'}.`, entityType: 'prayer_request'
+    });
+  }), [pb, run, user]);
 
   const incrementPrayer = useCallback((requestId: string) => {
     if (!user) return Promise.reject(new Error('Sign in to record a prayer watch.'));
@@ -356,6 +369,9 @@ export function usePrayerData() {
           await pb.collection('prayer_assignments').update(assignment.id, { status: 'completed' });
         }
       }
+      await recordAuditEvent(pb, user, {
+        action: 'prayer_answered', summary: 'Recorded an answered prayer outcome.', entityType: 'prayer_request', entityId: requestId
+      });
     });
   }, [pb, run, user]);
 
