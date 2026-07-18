@@ -7,6 +7,7 @@ import { useCurrentUser } from '../../lib/db/hooks';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useGovernanceData, type FeedbackStatus, type FeedbackType } from '../../lib/db/governanceData';
 import { usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
+import { useOperationalSync } from '../../lib/db/syncData';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
 import { 
@@ -69,6 +70,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const { logout, pb, user: authUser } = useAuth();
   const governance = useGovernanceData();
   const { members: registryMembers, updateMember } = usePocketBaseMembers();
+  const { pendingCount: pendingSyncCount, failedCount: failedSyncCount } = useOperationalSync();
   
   // Get active system user & role
   const { role: userRole } = useCurrentUser();
@@ -995,7 +997,9 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
       >
         <div className="space-y-4 pb-6 text-center text-text-primary">
           <p className="text-xs text-text-secondary font-medium leading-relaxed max-w-sm mx-auto">
-            Are you sure you want to sign out of ChurchConnect? Your local offline changes and settings will remain safe on this device.
+            {pendingSyncCount + failedSyncCount > 0
+              ? `${pendingSyncCount + failedSyncCount} saved ${pendingSyncCount + failedSyncCount === 1 ? 'change is' : 'changes are'} still awaiting PocketBase. They will remain tied to this account on this device and resume only after you sign in again.`
+              : 'Are you sure you want to sign out of ChurchConnect? Your device settings will remain available.'}
           </p>
 
           <div className="grid grid-cols-2 gap-2 pt-2">

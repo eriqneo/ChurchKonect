@@ -1,4 +1,7 @@
+import { processCellOutbox } from './cellOperations';
 import { db, putAppSetting } from './churchConnectDB';
+import { processTrainingOutbox } from './trainingData';
+import { pb } from '../pocketbase/client';
 
 export interface SyncProgress {
   status: 'idle' | 'syncing' | 'success' | 'failed';
@@ -9,190 +12,110 @@ export interface SyncProgress {
 
 type SyncProgressCallback = (progress: SyncProgress) => void;
 
+/**
+ * Coordinates the real, module-owned outboxes. It never changes a domain row to
+ * `synced`; only a successful PocketBase command in the owning processor may do that.
+ */
 class SyncEngine {
-  private isSyncing = false;
-  private listeners: Set<SyncProgressCallback> = new Set();
-  private onlineStatus = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  private backoffDelay = 1000; // start with 1s backoff for failures
+  private processing: { ownerId: string; promise: Promise<boolean> } | null = null;
+  private listeners = new Set<SyncProgressCallback>();
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this.handleConnectionChange(true));
-      window.addEventListener('offline', () => this.handleConnectionChange(false));
-    }
-  }
-
-  private handleConnectionChange(isOnline: boolean) {
-    this.onlineStatus = isOnline;
-    console.log(`[SyncEngine] Network connection status: ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
-    this.broadcastProgress({
-      status: isOnline ? 'idle' : 'failed',
-      pendingCount: 0,
-      processedCount: 0,
-      message: isOnline ? 'Back online. Ready to synchronize.' : 'Offline mode active. Edits saved locally.'
-    });
-
-    if (isOnline) {
-      // Trigger sync automatically when reconnected
-      this.syncNow().catch(console.error);
-    }
+    if (typeof window === 'undefined') return;
+    window.addEventListener('online', () => { void this.syncNow(); });
+    window.addEventListener('offline', () => { void this.publishCurrent('failed', 'Offline mode active. Changes remain saved on this device.'); });
   }
 
   public isOnline(): boolean {
-    return this.onlineStatus;
+    return typeof navigator === 'undefined' || navigator.onLine;
   }
 
-  public subscribe(callback: SyncProgressCallback) {
+  public subscribe(callback: SyncProgressCallback): () => void {
     this.listeners.add(callback);
-    // Initial callback
-    this.getPendingCount().then((pending) => {
-      callback({
-        status: this.isSyncing ? 'syncing' : 'idle',
-        pendingCount: pending,
-        processedCount: 0,
-        message: this.isOnline() ? 'Ready' : 'Offline Mode'
-      });
-    });
-    return () => {
-      this.listeners.delete(callback);
-    };
-  }
-
-  private broadcastProgress(progress: SyncProgress) {
-    this.listeners.forEach((cb) => cb(progress));
-    // Also trigger custom event for easy access without hook subscription
-    if (typeof window !== 'undefined') {
-      const event = new CustomEvent('churchconnect_sync_progress', { detail: progress });
-      window.dispatchEvent(event);
-    }
+    void this.currentProgress().then(callback);
+    return () => this.listeners.delete(callback);
   }
 
   public async getPendingCount(): Promise<number> {
-    let total = 0;
-    try {
-      // Tables that track syncStatus
-      const syncableTables = [
-        db.members
-      ];
-
-      for (const table of syncableTables) {
-        // Dexie query for pending or failed
-        const pending = await table.where('syncStatus').equals('pending').count();
-        const failed = await table.where('syncStatus').equals('failed').count();
-        total += (pending + failed);
-      }
-    } catch (e) {
-      console.error('[SyncEngine] Failed counting pending:', e);
-    }
-    return total;
+    const ownerId = pb.authStore.record?.id;
+    if (!ownerId) return 0;
+    return db.outbox.where('ownerId').equals(ownerId)
+      .filter((item) => item.status === 'pending' || item.status === 'processing')
+      .count();
   }
 
-  public async syncNow(): Promise<boolean> {
-    if (this.isSyncing) return false;
-    if (!this.onlineStatus) {
-      this.broadcastProgress({
-        status: 'failed',
-        pendingCount: await this.getPendingCount(),
-        processedCount: 0,
-        message: 'Sync failed: Device is offline.'
-      });
+  public syncNow(): Promise<boolean> {
+    const ownerId = pb.authStore.record?.id || '';
+    if (this.processing?.ownerId === ownerId) return this.processing.promise;
+    const previous = this.processing?.promise;
+    const run = () => this.run();
+    const promise = previous ? previous.then(run, run) : run();
+    this.processing = { ownerId, promise };
+    void promise.finally(() => {
+      if (this.processing?.promise === promise) this.processing = null;
+    });
+    return promise;
+  }
+
+  private async currentProgress(): Promise<SyncProgress> {
+    const ownerId = pb.authStore.record?.id;
+    if (!ownerId) return { status: 'idle', pendingCount: 0, processedCount: 0, message: 'Sign in to synchronize.' };
+    const rows = await db.outbox.where('ownerId').equals(ownerId).toArray();
+    const pendingCount = rows.filter((item) => item.status !== 'failed').length;
+    const failedCount = rows.filter((item) => item.status === 'failed').length;
+    if (!this.isOnline()) return { status: 'failed', pendingCount, processedCount: 0, message: 'Offline mode active. Changes remain saved on this device.' };
+    if (failedCount) return { status: 'failed', pendingCount, processedCount: 0, message: `${failedCount} change${failedCount === 1 ? '' : 's'} need attention.` };
+    return { status: 'idle', pendingCount, processedCount: 0, message: pendingCount ? `${pendingCount} change${pendingCount === 1 ? '' : 's'} waiting for PocketBase.` : 'All operational changes are acknowledged.' };
+  }
+
+  private broadcast(progress: SyncProgress): void {
+    this.listeners.forEach((callback) => callback(progress));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('churchconnect_sync_progress', { detail: progress }));
+    }
+  }
+
+  private async publishCurrent(status: SyncProgress['status'], message: string): Promise<void> {
+    const current = await this.currentProgress();
+    this.broadcast({ ...current, status, message });
+  }
+
+  private async run(): Promise<boolean> {
+    const ownerId = pb.authStore.record?.id;
+    if (!ownerId || !pb.authStore.isValid) {
+      await this.publishCurrent('failed', 'Sign in again before synchronizing.');
+      return false;
+    }
+    if (!this.isOnline()) {
+      await this.publishCurrent('failed', 'Offline mode active. Changes remain saved on this device.');
       return false;
     }
 
-    this.isSyncing = true;
-    const pendingTotal = await this.getPendingCount();
-
-    if (pendingTotal === 0) {
-      this.isSyncing = false;
-      this.broadcastProgress({
-        status: 'success',
-        pendingCount: 0,
-        processedCount: 0,
-        message: 'All records synchronized.'
-      });
-      return true;
-    }
-
-    this.broadcastProgress({
-      status: 'syncing',
-      pendingCount: pendingTotal,
-      processedCount: 0,
-      message: `Syncing ${pendingTotal} pending logs...`
-    });
+    const before = await this.getPendingCount();
+    this.broadcast({ status: 'syncing', pendingCount: before, processedCount: 0, message: before ? `Sending ${before} saved change${before === 1 ? '' : 's'} to PocketBase…` : 'Checking PocketBase acknowledgement state…' });
 
     try {
-      const tablesToSync = [
-        { table: db.members, name: 'Members' }
-      ];
-
-      let processed = 0;
-
-      for (const { table, name } of tablesToSync) {
-        // Fetch both 'pending' and 'failed'
-        const pendingRecords = await table
-          .where('syncStatus')
-          .anyOf(['pending', 'failed'])
-          .toArray();
-
-        if (pendingRecords.length === 0) continue;
-
-        console.log(`[SyncEngine] Uploading ${pendingRecords.length} records for ${name}`);
-
-        // Simulate realistic network batch upload delay of 120ms per record
-        await new Promise((resolve) => setTimeout(resolve, Math.min(600, pendingRecords.length * 100)));
-
-        // Update each record state in local db to 'synced'
-        const nowStr = new Date().toISOString();
-        for (const record of pendingRecords) {
-          if (record.id) {
-            await table.update(record.id, {
-              syncStatus: 'synced',
-              updatedAt: nowStr
-            });
-            processed++;
-            this.broadcastProgress({
-              status: 'syncing',
-              pendingCount: pendingTotal,
-              processedCount: processed,
-              message: `Synchronized ${processed}/${pendingTotal} items...`
-            });
-          }
-        }
+      await processCellOutbox(pb, ownerId);
+      await processTrainingOutbox(pb, ownerId);
+      const rows = await db.outbox.where('ownerId').equals(ownerId).toArray();
+      const pendingCount = rows.filter((item) => item.status !== 'failed').length;
+      const failedCount = rows.filter((item) => item.status === 'failed').length;
+      const processedCount = Math.max(0, before - pendingCount);
+      if (failedCount) {
+        this.broadcast({ status: 'failed', pendingCount, processedCount, message: `${failedCount} change${failedCount === 1 ? '' : 's'} were rejected and need attention.` });
+        return false;
       }
-
-      // Reset exponential backoff on success
-      this.backoffDelay = 1000;
-      this.isSyncing = false;
-
-      // Track last sync time in settings
-      const syncTime = new Date().toISOString();
-      await putAppSetting('lastSyncTime', syncTime);
-
-      this.broadcastProgress({
-        status: 'success',
-        pendingCount: 0,
-        processedCount: pendingTotal,
-        message: `Synchronization complete. ${pendingTotal} records uploaded.`
-      });
-
+      if (pendingCount) {
+        this.broadcast({ status: 'idle', pendingCount, processedCount, message: `${pendingCount} change${pendingCount === 1 ? '' : 's'} remain queued for retry.` });
+        return false;
+      }
+      const acknowledgedAt = new Date().toISOString();
+      await putAppSetting(`lastServerAck:${ownerId}`, acknowledgedAt);
+      this.broadcast({ status: 'success', pendingCount: 0, processedCount, message: processedCount ? `${processedCount} change${processedCount === 1 ? '' : 's'} acknowledged by PocketBase.` : 'All operational changes are acknowledged.' });
       return true;
     } catch (error) {
-      console.error('[SyncEngine] Sync failed:', error);
-      this.isSyncing = false;
-
-      this.broadcastProgress({
-        status: 'failed',
-        pendingCount: await this.getPendingCount(),
-        processedCount: 0,
-        message: 'Synchronization failed. Retrying in background.'
-      });
-
-      // Exponential backoff retry
-      setTimeout(() => {
-        this.backoffDelay = Math.min(60000, this.backoffDelay * 2);
-        this.syncNow().catch(console.error);
-      }, this.backoffDelay);
-
+      console.error('[Sync] PocketBase reconciliation failed:', error);
+      await this.publishCurrent('failed', 'PocketBase could not confirm the queued changes. They remain saved on this device.');
       return false;
     }
   }

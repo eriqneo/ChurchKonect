@@ -8,6 +8,18 @@ production authentication, member and cell administration, local-first cell oper
 announcements, prayer coordination, aggregate reports, notifications, feedback, and operational
 activity history. Each backend module is reconciled and authorization-tested before work moves on.
 
+### Production synchronization
+
+The global connection indicator is backed by the authenticated user's real Dexie `outbox`.
+Cell operations and Academy check-ins remain `pending` until their module processor receives a
+PocketBase acknowledgement; no timer can mark a record synchronized. Rejected commands remain
+visible as **Needs attention**, including the server error and attempt count, and can be retried
+from the Synchronization sheet. Reconnects, manual retries, and service-worker sync requests all
+use the same idempotent coordinator.
+
+Production builds never seed demo personas or records. Existing unscoped legacy demo rows are
+retired once without deleting account-scoped server caches or queued operations.
+
 ## Local development
 
 Requirements: Node.js 20+ and npm.

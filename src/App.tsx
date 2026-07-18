@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MobileLayout } from './components/layout/MobileLayout';
-import { seedDatabase } from './lib/db/seedData';
+import { retireLegacyDemoData } from './lib/db/legacyData';
 import { useAuth } from './lib/db/PocketBaseProvider';
 import { LoginScreen } from './components/shared/LoginScreen';
 
@@ -11,7 +11,7 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
-        await seedDatabase();
+        await retireLegacyDemoData();
       } catch (err) {
         console.error('Error during database initialization:', err);
       } finally {

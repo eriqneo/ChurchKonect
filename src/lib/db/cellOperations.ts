@@ -28,8 +28,8 @@ interface VisitorPayload { visitor: CellVisitorRecord; attendance: CellAttendanc
 interface SubmitReportPayload { report: CellReportRecord; meetingId: string; endedAt: string }
 interface ReviewReportPayload { reportId: string; reportStatus: 'approved' | 'rejected'; reviewedBy: string; reviewedAt: string; reviewNotes: string }
 
-let processingPromise: Promise<void> | null = null;
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
+const processingByOwner = new Map<string, Promise<void>>();
+const retryTimersByOwner = new Map<string, ReturnType<typeof setTimeout>>();
 
 function expandedName(record: RecordModel, key: string): string | undefined {
   const expanded = record.expand?.[key];
@@ -203,6 +203,29 @@ function isTransient(error: unknown): boolean {
   return status === 0 || status === 401 || status === 408 || status === 429 || status >= 500;
 }
 
+async function markCommandFailed(item: OutboxRecord): Promise<void> {
+  if (item.command === 'start_meeting') {
+    const payload = item.payload as unknown as StartMeetingPayload;
+    await db.cellMeetings.where('localId').equals(payload.meeting.localId).modify({ syncStatus: 'failed' });
+    for (const attendance of payload.attendance) {
+      await db.cellAttendance.where('localId').equals(attendance.localId).modify({ syncStatus: 'failed' });
+    }
+  } else if (item.command === 'mark_attendance') {
+    const { attendance } = item.payload as unknown as AttendancePayload;
+    await db.cellAttendance.where('localId').equals(attendance.localId).modify({ syncStatus: 'failed' });
+  } else if (item.command === 'add_visitor') {
+    const { visitor, attendance } = item.payload as unknown as VisitorPayload;
+    await db.cellVisitors.where('localId').equals(visitor.localId).modify({ syncStatus: 'failed' });
+    await db.cellAttendance.where('localId').equals(attendance.localId).modify({ syncStatus: 'failed' });
+  } else if (item.command === 'submit_report') {
+    const { report, meetingId } = item.payload as unknown as SubmitReportPayload;
+    await db.cellReports.where('localId').equals(report.localId).modify({ syncStatus: 'failed' });
+    await db.cellMeetings.where('localId').equals(meetingId).modify({ syncStatus: 'failed' });
+  } else {
+    await db.cellReports.where('localId').equals(item.entityId).modify({ syncStatus: 'failed' });
+  }
+}
+
 async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
   const cellCommands = new Set(['start_meeting', 'mark_attendance', 'add_visitor', 'submit_report', 'review_report']);
@@ -211,8 +234,9 @@ async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
   await db.outbox.where('ownerId').equals(ownerId)
     .filter((item) => item.status === 'processing' && cellCommands.has(item.command))
     .modify({ status: 'pending' });
+  const now = Date.now();
   const items = await db.outbox.where('ownerId').equals(ownerId)
-    .filter((item) => item.status === 'pending' && cellCommands.has(item.command))
+    .filter((item) => item.status === 'pending' && cellCommands.has(item.command) && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now))
     .sortBy('createdAt');
   for (const item of items) {
     if (!item.id) continue;
@@ -238,11 +262,13 @@ async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
         nextAttemptAt: transient ? new Date(Date.now() + delay).toISOString() : undefined,
         updatedAt: new Date().toISOString()
       });
-      if (transient && status !== 401 && !retryTimer) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
+      if (!transient) await markCommandFailed(item);
+      if (transient && status !== 401 && !retryTimersByOwner.has(ownerId)) {
+        const timer = setTimeout(() => {
+          retryTimersByOwner.delete(ownerId);
           if (pb.authStore.record?.id === ownerId) void processCellOutbox(pb, ownerId);
         }, delay);
+        retryTimersByOwner.set(ownerId, timer);
       }
       break;
     }
@@ -250,10 +276,13 @@ async function runOutbox(pb: PocketBase, ownerId: string): Promise<void> {
 }
 
 export function processCellOutbox(pb: PocketBase, ownerId: string): Promise<void> {
-  if (!processingPromise) {
-    processingPromise = runOutbox(pb, ownerId).finally(() => { processingPromise = null; });
-  }
-  return processingPromise;
+  const existing = processingByOwner.get(ownerId);
+  if (existing) return existing;
+  const processing = runOutbox(pb, ownerId).finally(() => {
+    if (processingByOwner.get(ownerId) === processing) processingByOwner.delete(ownerId);
+  });
+  processingByOwner.set(ownerId, processing);
+  return processing;
 }
 
 function outboxRecord(ownerId: string, command: OutboxRecord['command'], entityId: string, payload: Record<string, unknown>): OutboxRecord {

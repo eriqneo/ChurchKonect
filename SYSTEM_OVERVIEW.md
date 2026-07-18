@@ -1,6 +1,6 @@
 # ChurchConnect: Comprehensive System & Architecture Overview
 
-ChurchConnect is a state-of-the-art, mobile-first church administration and small group management portal. Engineered specifically for local-first reliability, the application combines a high-fidelity **"Fintech & Fitness App Aesthetic"** with robust offline capabilities, instant client-side performance, and continuous synchronization.
+ChurchConnect is a mobile-first church administration and small-group management portal. PocketBase is the server authority, with focused offline resilience for service-critical operations and fast account-scoped caches for recently used screens.
 
 ---
 
@@ -12,11 +12,11 @@ Designed explicitly for handheld touchscreens, the system operates as a single-p
 *   **Gestural Sheet Modals**: Replaces harsh desktop popups with elegant, bottom-sheet drawers (`motion/react` spring-physics) featuring slide-to-dismiss drag mechanics and tactile visual grab-handles.
 *   **Micro-interactions & Tactility**: Every tap, checkbox click, state transition, and tab swap utilizes bouncy spring animations (`whileTap={{ scale: 0.95 }}`) and visual ripples to emulate native application physics.
 
-### 🔌 Local-First & Offline-Capable
-Administrative church tasks often happen in areas with spotty cellular coverage (reverent basements, rural meeting points). ChurchConnect handles this seamlessly:
-*   **Client-Side Persistence**: Built directly upon IndexedDB using **Dexie.js** for blistering search speed and zero server-roundtrip latency.
-*   **Instant Query Engine (`useLiveQuery`)**: UI screens bind directly to local collections. Changes reflect on screen instantly (<16ms frame target), bypassing loading spinner walls.
-*   **Background Sync Engine**: Implements a mutation queue. Local writes are recorded immediately, and a differential sync thread periodically attempts to reconcile them with the remote backend (PocketBase) whenever internet connectivity recovers.
+### 🔌 Online-First & Offline-Resilient
+PocketBase owns canonical identity, permissions, records, and reporting. Dexie stores scoped read caches, device settings, and durable critical-operation outboxes:
+*   **Scoped Persistence**: Confirmed caches are keyed to the authenticated account and purged at logout where required.
+*   **Responsive Queries**: Recently confirmed data can render immediately while the active module revalidates against PocketBase.
+*   **Acknowledged Synchronization**: Cell operations and Academy check-ins stay pending until their idempotent PocketBase command succeeds. Permanent rejection is shown as **Needs attention**; timers never manufacture a successful state.
 
 ---
 
@@ -77,34 +77,21 @@ The system is compartmentalized into self-contained modules, each tailored to sp
 *   **Purpose**: Direct communication system.
 *   **Key Features**:
     *   **Notification Panel**: Dropdown and floating alerts detailing background synchronization updates, newly assigned prayer points, or report approvals.
-    *   **Communication Templates**: Formulate bulk communication drafts for Cell Leaders, Pastors, or general announcements.
+    *   **Recipient State**: Read and dismissed receipts synchronize across a user's signed-in devices.
 
 ---
 
 ## 3. Database Schema & Storage Map
 
-The local storage layer (IndexedDB via Dexie) is structured across highly optimized relational tables:
+The local storage layer is a support layer, not a second source of truth:
 
 ```typescript
-// Dexie IndexedDB Schema Definition
+// Simplified production responsibilities
 {
-  members: 'id, name, email, role, cellGroupId, sectionId, districtId, pillar, status',
-  cellGroups: 'id, name, leaderId, sectionId, meetingDay, meetingTime, status',
-  sections: 'id, name, pastorId, districtId',
-  districts: 'id, name, overseerId',
-  cellMeetings: 'id, cellGroupId, date, status, elapsedSeconds',
-  cellAttendances: 'id, meetingId, memberId, present, isVisitor',
-  cellReports: 'id, cellGroupId, meetingId, attendanceCount, visitorCount, topics, status, submittedAt',
-  trainings: 'id, name, code, durationWeeks, status',
-  trainingEnrollments: 'id, trainingId, memberId, status, progressPercent, enrolledAt',
-  trainingSessions: 'id, trainingId, lessonNumber, date, facilitatorId',
-  trainingAttendance: 'id, sessionId, memberId, present',
-  trainingCertificates: 'id, trainingId, memberId, issuedAt',
-  prayerRequests: 'id, title, description, category, requestorId, status, isUrgent, createdAt',
-  prayerAssignments: 'id, requestId, assignedToId, status, assignedAt',
-  notifications: 'id, title, message, type, recipientId, read, createdAt',
-  logs: 'id, action, category, details, timestamp',
-  roleSettings: 'id, activeRole'
+  scopedCaches: ['members', 'directoryMembers', 'cellGroups', 'trainings', 'announcements', 'notifications'],
+  criticalLocalViews: ['cellMeetings', 'cellAttendance', 'cellVisitors', 'cellReports', 'trainingAttendance'],
+  durableOutbox: ['start_meeting', 'mark_attendance', 'add_visitor', 'submit_report', 'review_report', 'training_check_in'],
+  deviceOnly: ['appSettings']
 }
 ```
 
@@ -112,13 +99,13 @@ The local storage layer (IndexedDB via Dexie) is structured across highly optimi
 
 ## 4. Sync & Conflict Resolution Engine
 
-To reconcile offline client-side databases with the central cloud system, the application uses an active, multi-stage synchronization lifecycle:
+Critical offline-capable commands use one real acknowledgement lifecycle:
 
 ```
 [UI Mutation (User Action)] 
          │
          ▼
-[Write to Local IndexedDB] ──► [Queue Sync Change Log]
+[Write local operational view] ──► [Queue idempotent outbox command]
                                       │
                                       ▼
                              [Check Connectivity]
@@ -126,12 +113,12 @@ To reconcile offline client-side databases with the central cloud system, the ap
                              └──► (Online): Process queue sequentially
                                         │
                                         ▼
-                                [Sync Reconciler]
-                                ├── Push client-side mutation
-                                ├── Pull remote increments
-                                └── Apply Conflict rules (LWW - Last Write Wins)
+                                [Module command processor]
+                                ├── Send stable operation and entity IDs
+                                ├── Let PocketBase rules accept or reject
+                                └── Mark synced only after acknowledgement
 ```
 
-1.  **Change Tracking**: All local mutations (inserts, updates, deletions) record metadata indicating the change timestamp, operation type, and modified keys.
-2.  **Heartbeat Network Monitor**: Constantly queries navigator status and runs diagnostic ping triggers to set the global online indicator state.
-3.  **Conflict Reconciler**: Implements *Last-Write-Wins (LWW)* timestamp conflict merging. If records modify concurrently, timestamps arbitrate the final state. If structural deletions conflict, server-defined constraints take precedence.
+1. **Stable identity:** every queued command has an immutable operation ID and PocketBase-compatible entity ID.
+2. **Bounded retry:** transient network failures remain queued with backoff; permanent authorization or validation failures become **Needs attention**.
+3. **Server authority:** editable canonical records use explicit server workflows; the client does not silently apply last-write-wins conflict merging.

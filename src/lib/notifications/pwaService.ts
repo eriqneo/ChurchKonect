@@ -32,10 +32,7 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
     navigator.serviceWorker.addEventListener('message', (event) => {
       if (event.data?.type === 'TRIGGER_SYNC') {
         console.log('[PWA] Sync requested by service worker');
-        // Import dynamically to avoid circular dependencies
-        import('../db/SyncEngine').then(({ syncEngine }) => {
-          syncEngine.syncNow().catch(console.error);
-        });
+        window.dispatchEvent(new CustomEvent('churchconnect_sync_requested'));
       }
       if (event.data?.type === 'BADGE_UPDATE') {
         console.log('[PWA] Badge update received from service worker:', event.data.count);

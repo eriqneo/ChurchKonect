@@ -1383,7 +1383,7 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                                   {mInfo?.avatarText || mInfo?.fullName.split(' ').map(n => n[0]).join('') || 'M'}
                                 </div>
                                 <div className="min-w-0">
-                                  <h5 className="text-xs font-black text-text-primary truncate">{mInfo?.fullName || 'Sister Clara'}</h5>
+                                  <h5 className="text-xs font-black text-text-primary truncate">{mInfo?.fullName || 'Unknown member'}</h5>
                                   <p className="text-[10px] text-text-muted mt-0.5 font-mono">{mInfo?.qrCode || getMemberBadgeCode(enroll.memberId)}</p>
                                 </div>
                               </div>

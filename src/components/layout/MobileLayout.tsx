@@ -33,7 +33,6 @@ import {
   Wifi, 
   WifiOff, 
   User, 
-  QrCode, 
   Plus, 
   FileText, 
   MapPin, 
@@ -41,10 +40,12 @@ import {
   ChevronRight, 
   Flame, 
   ShieldAlert,
-  Send,
   Sliders,
   Settings,
   Megaphone,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
   X
 } from 'lucide-react';
 
@@ -59,6 +60,7 @@ import { CommunicationModule } from '../communication/CommunicationModule';
 import { NotificationSystem } from '../communication/NotificationSystem';
 import { useNotifications } from '../../lib/db/notificationData';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { useOperationalSync } from '../../lib/db/syncData';
 import { APP_ROLES, getRoleView } from '../../lib/auth/roles';
 
 
@@ -73,6 +75,17 @@ const ENABLE_ROLE_SIMULATOR = import.meta.env.DEV && import.meta.env.VITE_ENABLE
 export function MobileLayout() {
   const { theme, toggleTheme, isDark } = useTheme();
   const { user, logout } = useAuth();
+  const {
+    isOnline,
+    isSyncing,
+    pendingCount: pendingChanges,
+    failedCount: failedChanges,
+    items: syncItems,
+    message: syncMessage,
+    lastAcknowledgedAt,
+    syncNow,
+    retryFailed
+  } = useOperationalSync();
 
   // Navigation and State
   const [activeTab, setActiveTab] = useState<string>('home');
@@ -92,8 +105,6 @@ export function MobileLayout() {
     }
   }, [user]);
 
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [pendingChanges, setPendingChanges] = useState<number>(0);
   const [scrolled, setScrolled] = useState<boolean>(false);
   const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
   const lastScrollTopRef = useRef(0);
@@ -105,58 +116,12 @@ export function MobileLayout() {
 
   // Bottom Sheets & Modals
   const [showRoleSelector, setShowRoleSelector] = useState<boolean>(false);
-  const [showQRModal, setShowQRModal] = useState<boolean>(false);
-  const [showPrayerForm, setShowPrayerForm] = useState<boolean>(false);
-  const [showAttendanceForm, setShowAttendanceForm] = useState<boolean>(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState<boolean>(false);
+  const [isSyncStatusOpen, setIsSyncStatusOpen] = useState<boolean>(false);
 
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Dynamic States for Interactive Features
-  const [prayers, setPrayers] = useState([
-    { id: '1', author: 'Sister Clara', request: 'Healing for my mother who is undergoing surgery tomorrow morning.', category: 'Healing', amens: 24, hasAmened: false },
-    { id: '2', author: 'Brother Timothy', request: 'Seeking guidance and divine wisdom in career choices and transition.', category: 'Guidance', amens: 18, hasAmened: false },
-    { id: '3', author: 'Sister Martha', request: 'Praising God for the breakthrough in our regional cell group expansion!', category: 'Thanksgiving', amens: 35, hasAmened: false }
-  ]);
-
-  const [newPrayerText, setNewPrayerText] = useState<string>('');
-  const [newPrayerCategory, setNewPrayerCategory] = useState<string>('Guidance');
-
-  const [cellMembers, setCellMembers] = useState([
-    { id: 'm1', name: 'Benjamin Cole', present: true },
-    { id: 'm2', name: 'Diana Ross', present: true },
-    { id: 'm3', name: 'Felix Thorne', present: false },
-    { id: 'm4', name: 'Abigail Smith', present: true },
-    { id: 'm5', name: 'Hannah Abbott', present: false }
-  ]);
-
-  // Handle Online/Offline Status
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      // Simulate sync completing
-      setTimeout(() => {
-        setPendingChanges(0);
-      }, 2500);
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      setPendingChanges((prev) => (prev === 0 ? 2 : prev));
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Initial check
-    setIsOnline(navigator.onLine);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   const currentRole = getRoleView(user!);
   
@@ -197,63 +162,9 @@ export function MobileLayout() {
 
   // Sync Bell Indicator Color
   const getSyncIndicatorColor = () => {
-    if (!isOnline) return 'bg-cathedral-500'; // Offline/failed indicator
-    if (pendingChanges > 0) return 'bg-gold-500 animate-glow-pulse'; // Syncing
+    if (!isOnline || failedChanges > 0) return 'bg-cathedral-500';
+    if (pendingChanges > 0 || isSyncing) return 'bg-gold-500 animate-glow-pulse';
     return 'bg-[#7BC47F]'; // Synced
-  };
-
-  const handleAmen = (id: string) => {
-    setPrayers(prev => prev.map(p => {
-      if (p.id === id) {
-        return {
-          ...p,
-          amens: p.hasAmened ? p.amens - 1 : p.amens + 1,
-          hasAmened: !p.hasAmened
-        };
-      }
-      return p;
-    }));
-
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate(20);
-    }
-  };
-
-  const submitPrayer = () => {
-    if (!newPrayerText.trim()) return;
-    const newReq = {
-      id: Date.now().toString(),
-      author: currentRole.name,
-      request: newPrayerText,
-      category: newPrayerCategory,
-      amens: 0,
-      hasAmened: false
-    };
-    setPrayers([newReq, ...prayers]);
-    setNewPrayerText('');
-    setShowPrayerForm(false);
-    
-    // Increment pending changes if offline
-    if (!isOnline) {
-      setPendingChanges(prev => prev + 1);
-    }
-  };
-
-  const toggleAttendance = (memberId: string) => {
-    setCellMembers(prev => prev.map(m => {
-      if (m.id === memberId) {
-        return { ...m, present: !m.present };
-      }
-      return m;
-    }));
-  };
-
-  const saveAttendance = () => {
-    setShowAttendanceForm(false);
-    if (!isOnline) {
-      setPendingChanges(prev => prev + 1);
-    }
-    alert(`Attendance saved: ${cellMembers.filter(m => m.present).length} present, ${cellMembers.filter(m => !m.present).length} absent.`);
   };
 
   const triggerHaptic = () => {
@@ -286,34 +197,25 @@ export function MobileLayout() {
         </div>
         <div className="h-4 w-px bg-surface-200"></div>
         
-        {/* Quick Simulator Launcher */}
-        <button
+        {ENABLE_ROLE_SIMULATOR && <button
           onClick={() => setShowRoleSelector(true)}
           className="flex items-center gap-1.5 px-3 py-1 bg-gold-500/10 text-gold-500 border border-gold-500/20 rounded-full text-xs font-semibold hover:bg-gold-500/20 transition-all cursor-pointer"
         >
           <Sliders className="w-3.5 h-3.5" />
-          <span>Simulate Roles</span>
-        </button>
+          <span>Development roles</span>
+        </button>}
 
-        {/* Offline Toggle Simulator */}
         <button
-          onClick={() => {
-            if (isOnline) {
-              setIsOnline(false);
-              setPendingChanges(2);
-            } else {
-              setIsOnline(true);
-              setTimeout(() => setPendingChanges(0), 1500);
-            }
-          }}
+          type="button"
+          onClick={() => setIsSyncStatusOpen(true)}
           className={`flex items-center gap-1.5 px-3 py-1 border rounded-full text-xs font-semibold transition-all cursor-pointer ${
-            isOnline 
+            isOnline && failedChanges === 0
               ? 'bg-semantic-success/10 text-semantic-success border-semantic-success/20 hover:bg-semantic-success/15'
               : 'bg-cathedral-500/10 text-cathedral-400 border-cathedral-500/20 hover:bg-cathedral-500/20'
           }`}
         >
           {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-          <span>{isOnline ? 'Network: Online' : 'Network: Offline'}</span>
+          <span>{!isOnline ? 'Offline' : failedChanges ? `${failedChanges} need attention` : pendingChanges ? `${pendingChanges} syncing` : 'PocketBase confirmed'}</span>
         </button>
 
         {/* Theme switcher */}
@@ -489,24 +391,24 @@ export function MobileLayout() {
                       eyebrow="Pastor's Portal"
                       title="Sunday Gathering Prep"
                       subtitle="Confirm sermon notes, review leader reports, and inspect weekly offerings."
-                      actionLabel="Review Agenda"
-                      onAction={() => alert('Opening sermon agenda notes...')}
+                      actionLabel="Review Reports"
+                      onAction={() => setActiveTab('reports')}
                     />
                   ) : currentRole.id === 'cell_leader' ? (
                     <HeroCard
                       eyebrow="Cell Ministry"
-                      title="Take Attendance Today"
-                      subtitle="Log today's member responses for the Hope Fellowship gathering."
-                      actionLabel="Log Response"
-                      onAction={() => setShowAttendanceForm(true)}
+                      title="Manage Today's Fellowship"
+                      subtitle="Open your assigned fellowship to start a meeting and record attendance."
+                      actionLabel="Open Cells"
+                      onAction={() => setActiveTab('cells')}
                     />
                   ) : currentRole.id === 'guest' ? (
                     <HeroCard
                       eyebrow="New to Church?"
                       title="The First Steps Alpha"
                       subtitle="Join our digital companion class this Thursday to study the foundations of faith."
-                      actionLabel="Enroll Now"
-                      onAction={() => alert('Thank you! You are registered for Alpha.')}
+                      actionLabel="Browse Academy"
+                      onAction={() => setActiveTab('academy')}
                     />
                   ) : (
                     <HeroCard
@@ -536,23 +438,6 @@ export function MobileLayout() {
                               <div>
                                 <h4 className="text-xs font-bold text-theme-text">Cell Reports Pending Approval</h4>
                                 <p className="text-[10px] text-theme-text-secondary mt-0.5">Review Hope & Faith fellowship submissions</p>
-                              </div>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
-                          </GlassCard>
-
-                          <GlassCard 
-                            pressable={true}
-                            onPress={() => { triggerHaptic(); alert('Sermon Outline Review: Open PDF outline'); }}
-                            className="p-3 flex items-center justify-between border-l-4 border-l-gold-500 cursor-pointer hover:bg-theme-text/5"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-gold-500/10 text-gold-500 flex items-center justify-center font-bold text-xs flex-shrink-0">
-                                1
-                              </div>
-                              <div>
-                                <h4 className="text-xs font-bold text-theme-text">Review Sunday Sermon Notes</h4>
-                                <p className="text-[10px] text-theme-text-secondary mt-0.5">District Sermon Outline for July 5th</p>
                               </div>
                             </div>
                             <ChevronRight className="w-4 h-4 text-theme-text-muted flex-shrink-0" />
@@ -657,13 +542,13 @@ export function MobileLayout() {
                       title="Sunday Grace Gathering"
                       subtitle="Sanctuary • Main preach"
                       meta="10:00 AM · Full Congregation"
-                      onPress={() => alert('Worship service details')}
+                      onPress={() => setActiveTab('announcements')}
                     />
                     <ContentRow
                       title="Youth Praise & Study"
                       subtitle="West Chapel • High energy praise"
                       meta="04:30 PM · Youth ministry"
-                      onPress={() => alert('Youth ministry details')}
+                      onPress={() => setActiveTab('announcements')}
                     />
                   </div>
 
@@ -737,30 +622,36 @@ export function MobileLayout() {
             OFFLINE BANNER (Conditional above tab bar)
            ========================================== */}
         <AnimatePresence>
-          {(!isOnline || pendingChanges > 0) && (
-            <motion.div
+          {(!isOnline || pendingChanges > 0 || failedChanges > 0 || isSyncing) && (
+            <motion.button
+              type="button"
+              onClick={() => setIsSyncStatusOpen(true)}
               initial={{ y: 50, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
-              className={`absolute bottom-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe))] md:bottom-20 left-0 right-0 h-9 z-40 flex items-center justify-between px-5 transition-all ${
-                !isOnline 
+              className={`absolute bottom-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe))] md:bottom-20 left-0 right-0 h-9 z-40 flex items-center justify-between px-5 text-left transition-all ${
+                !isOnline || failedChanges > 0
                   ? 'bg-cathedral-900 text-white border-t border-cathedral-800' 
-                  : 'bg-[#7BC47F] text-black border-t border-[#6BB36E]'
+                  : 'bg-gold-500 text-black border-t border-gold-600'
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="flex h-2 w-2 relative">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${!isOnline ? 'bg-cathedral-400' : 'bg-white'}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${!isOnline ? 'bg-cathedral-500' : 'bg-white'}`}></span>
+                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${!isOnline || failedChanges ? 'bg-cathedral-400' : 'bg-white'}`}></span>
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${!isOnline || failedChanges ? 'bg-cathedral-500' : 'bg-white'}`}></span>
                 </span>
                 <span className="text-[10px] font-bold uppercase tracking-wider">
-                  {!isOnline 
-                    ? `Working offline · ${pendingChanges} changes pending` 
-                    : 'Reconnected! Synchronizing catalog...'}
+                  {!isOnline
+                    ? pendingChanges ? `Offline · ${pendingChanges} saved on this device` : 'Offline · showing confirmed cache'
+                    : failedChanges
+                      ? `${failedChanges} ${failedChanges === 1 ? 'change needs' : 'changes need'} attention`
+                      : isSyncing
+                        ? `Synchronizing ${pendingChanges} ${pendingChanges === 1 ? 'change' : 'changes'}…`
+                        : `${pendingChanges} ${pendingChanges === 1 ? 'change is' : 'changes are'} queued`}
                 </span>
               </div>
-              <span className="text-[9px] font-mono opacity-80">cc_offline_v2</span>
-            </motion.div>
+              <span className="text-[9px] font-bold opacity-80">Review</span>
+            </motion.button>
           )}
         </AnimatePresence>
 
@@ -883,8 +774,8 @@ export function MobileLayout() {
                             <div className="py-1.5 space-y-2 text-xs font-semibold text-theme-text-secondary">
                               <button onClick={() => { setActiveTab('saints'); setIsDrawerOpen(false); }} className="block py-1.5 hover:text-gold-500 transition-colors">Members Directory</button>
                               <button onClick={() => { setActiveTab('cells'); setIsDrawerOpen(false); }} className="block py-1.5 hover:text-gold-500 transition-colors">Cell Groups (Cells)</button>
-                              <button onClick={() => alert('Viewing Clergy Districts')} className="block py-1.5 hover:text-gold-500 transition-colors">Districts & Pastors</button>
-                              <button onClick={() => alert('Viewing Ministries')} className="block py-1.5 hover:text-gold-500 transition-colors">Ministries & Staff</button>
+                              <button onClick={() => { setActiveTab('saints'); setIsDrawerOpen(false); }} className="block py-1.5 hover:text-gold-500 transition-colors">Sections & Pastors</button>
+                              <button onClick={() => { setActiveTab('saints'); setIsDrawerOpen(false); }} className="block py-1.5 hover:text-gold-500 transition-colors">Ministries & Staff</button>
                             </div>
                           </motion.div>
                         )}
@@ -935,7 +826,7 @@ export function MobileLayout() {
                       icon={<Settings className="w-4.5 h-4.5" />}
                       iconColor="bg-surface-300 text-theme-text-secondary"
                       label="System Settings"
-                      onPress={() => { triggerHaptic(); alert('Settings configuration...'); }}
+                      onPress={() => { triggerHaptic(); setActiveTab('profile'); setIsDrawerOpen(false); }}
                       trailing={<ChevronRight className="w-4 h-4 text-theme-text-muted" />}
                     />
 
@@ -1021,32 +912,7 @@ export function MobileLayout() {
               </div>
             </div>
 
-            <div className="pt-2 grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5A5A64] block">
-                  Offline Simulator
-                </span>
-                <button
-                  onClick={() => {
-                    triggerHaptic();
-                    if (isOnline) {
-                      setIsOnline(false);
-                      setPendingChanges(2);
-                    } else {
-                      setIsOnline(true);
-                      setTimeout(() => setPendingChanges(0), 1500);
-                    }
-                  }}
-                  className={`w-full py-2.5 rounded-pill border text-xs font-bold text-center cursor-pointer transition-colors ${
-                    isOnline 
-                      ? 'bg-cathedral-500/10 text-cathedral-400 border-cathedral-500/25 hover:bg-cathedral-500/20' 
-                      : 'bg-semantic-success/10 text-semantic-success border-semantic-success/25'
-                  }`}
-                >
-                  {isOnline ? 'Go Offline' : 'Go Online (Auto-Sync)'}
-                </button>
-              </div>
-
+            <div className="pt-2">
               <div className="space-y-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#5A5A64] block">
                   Security
@@ -1066,189 +932,80 @@ export function MobileLayout() {
           </div>
         </BottomSheet>}
 
-        {/* ==========================================
-            QR SCANNER SIMULATOR MODAL (BottomSheet Detent)
-           ========================================== */}
         <BottomSheet
-          isOpen={showQRModal}
-          onClose={() => setShowQRModal(false)}
-          title="Academy QR check-in"
+          isOpen={isSyncStatusOpen}
+          onClose={() => setIsSyncStatusOpen(false)}
+          title="Synchronization"
         >
-          <div className="space-y-5 pb-6 text-center">
-            <p className="text-xs text-theme-text-secondary font-medium leading-relaxed">
-              Scan the classroom QR Board to record attendance and unlock course materials automatically.
-            </p>
-
-            {/* Simulated camera scanning window box */}
-            <div className="w-56 h-56 mx-auto relative border-2 border-gold-500/30 rounded-2xl bg-black overflow-hidden flex items-center justify-center shadow-inner">
-              
-              {/* Corner framing indicators */}
-              <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-gold-500"></div>
-              <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-gold-500"></div>
-              <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-gold-500"></div>
-              <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-gold-500"></div>
-
-              {/* Glowing Scan Line Animation */}
-              <motion.div
-                animate={{ y: ['-100%', '100%'] }}
-                transition={{ repeat: Infinity, duration: 2.2, ease: 'linear' }}
-                className="absolute top-0 left-0 right-0 h-1 bg-gold-500 shadow-[0_0_15px_rgba(200,164,92,0.8)] opacity-60 pointer-events-none"
-              />
-
-              <div className="flex flex-col items-center justify-center opacity-40">
-                <QrCode className="w-24 h-24 text-white" />
-                <span className="text-[10px] font-mono text-white mt-1">ALIGN QR CODE</span>
+          <div className="space-y-4 pb-7">
+            <div className={`rounded-card border p-4 ${failedChanges ? 'border-cathedral-500/30 bg-cathedral-500/10' : 'border-gold-500/20 bg-gold-500/5'}`}>
+              <div className="flex items-start gap-3">
+                {!isOnline || failedChanges ? (
+                  <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0 text-cathedral-400" />
+                ) : pendingChanges || isSyncing ? (
+                  <RefreshCw className={`mt-0.5 h-5 w-5 flex-shrink-0 text-gold-500 ${isSyncing ? 'animate-spin' : ''}`} />
+                ) : (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-semantic-success" />
+                )}
+                <div className="min-w-0">
+                  <h4 className="text-sm font-black text-theme-text">
+                    {!isOnline ? 'Device is offline' : failedChanges ? 'Changes need attention' : pendingChanges || isSyncing ? 'PocketBase acknowledgement pending' : 'PocketBase confirmed'}
+                  </h4>
+                  <p className="mt-1 text-[11px] leading-relaxed text-theme-text-secondary">{syncMessage}</p>
+                  {lastAcknowledgedAt && !pendingChanges && !failedChanges && (
+                    <p className="mt-1.5 text-[9px] font-mono text-theme-text-muted">
+                      Last confirmed {new Date(lastAcknowledgedAt).toLocaleString()}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#7BC47F] animate-pulse"></span>
-              <span className="text-[10px] font-bold text-theme-text-secondary uppercase tracking-wider">
-                Awaiting Check-in...
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              <button
-                onClick={() => {
-                  triggerHaptic();
-                  setShowQRModal(false);
-                  setTimeout(() => {
-                    alert('Attendance Check-In Completed Successfully! Course credit logged.');
-                  }, 300);
-                }}
-                className="py-2 rounded-pill bg-[#C8A45C] text-black font-extrabold text-xs cursor-pointer shadow-sm"
-              >
-                Simulate Scan
-              </button>
-              <button
-                onClick={() => setShowQRModal(false)}
-                className="py-2 rounded-pill bg-theme-text/5 text-theme-text-secondary font-bold text-xs cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </BottomSheet>
-
-        {/* ==========================================
-            SUBMIT PRAYER REQUEST FORM (BottomSheet)
-           ========================================== */}
-        <BottomSheet
-          isOpen={showPrayerForm}
-          onClose={() => setShowPrayerForm(false)}
-          title="Submit Prayer Request"
-        >
-          <div className="space-y-4 pb-6">
-            <p className="text-xs text-theme-text-secondary font-medium">
-              Share your request with the congregation or lead elders for dedicated intercessory circles.
-            </p>
-
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-theme-text-muted">
-                Your Petition
-              </span>
-              <textarea
-                placeholder="Write your prayer request..."
-                value={newPrayerText}
-                onChange={(e) => setNewPrayerText(e.target.value)}
-                className="w-full h-28 p-3 rounded-card bg-theme-bg border border-theme-border focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-sm text-theme-text outline-none resize-none font-medium placeholder-theme-text-muted"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-theme-text-muted">
-                Category
-              </span>
-              <div className="grid grid-cols-3 gap-2">
-                {['Guidance', 'Healing', 'Thanksgiving'].map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setNewPrayerCategory(cat)}
-                    className={`py-2 px-1 text-xs font-bold border rounded-lg text-center cursor-pointer transition-colors ${
-                      newPrayerCategory === cat
-                        ? 'bg-gold-500/10 border-gold-500 text-gold-500'
-                        : 'bg-theme-card border-theme-border text-theme-text-secondary hover:bg-theme-text/5'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-2 flex gap-2">
-              <motion.button
-                whileTap={{ scale: 0.96 }}
-                onClick={submitPrayer}
-                className="flex-1 py-2.5 rounded-pill bg-gold-500 text-black font-extrabold text-xs cursor-pointer shadow-glow-gold text-center flex items-center justify-center gap-1"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Submit Request</span>
-              </motion.button>
-              <button
-                onClick={() => setShowPrayerForm(false)}
-                className="px-4 py-2.5 rounded-pill bg-theme-text/5 text-theme-text-secondary font-bold text-xs cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </BottomSheet>
-
-        {/* ==========================================
-            TAKE CELL ATTENDANCE FORM (BottomSheet)
-           ========================================== */}
-        <BottomSheet
-          isOpen={showAttendanceForm}
-          onClose={() => setShowAttendanceForm(false)}
-          title="Take Hope Cell Attendance"
-        >
-          <div className="space-y-4 pb-6">
-            <p className="text-xs text-theme-text-secondary font-medium leading-relaxed">
-              Mark the present cell guides and attendants for the regional house fellowship.
-            </p>
-
-            <div className="space-y-2">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-theme-text-muted block">
-                Cell Members
-              </span>
-
-              <div className="space-y-2 bg-theme-bg border border-theme-border rounded-card overflow-hidden">
-                {cellMembers.map((member) => (
-                  <div key={member.id} className="flex items-center justify-between p-3 border-b border-theme-border">
-                    <span className="text-sm font-bold text-theme-text">
-                      {member.name}
-                    </span>
-
-                    <button
-                      onClick={() => toggleAttendance(member.id)}
-                      className={`px-3 py-1.5 rounded-pill text-xs font-bold border transition-colors cursor-pointer ${
-                        member.present
-                          ? 'bg-semantic-success/10 text-semantic-success border-semantic-success/45'
-                          : 'bg-transparent text-theme-text-muted border-theme-border'
-                      }`}
-                    >
-                      {member.present ? 'Present' : 'Absent'}
-                    </button>
+            {syncItems.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-theme-text-muted">Saved operations</span>
+                {syncItems.map((item) => (
+                  <div key={item.operationId} className="rounded-xl border border-theme-border bg-theme-card p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-bold capitalize text-theme-text">{item.command.replaceAll('_', ' ')}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${item.status === 'failed' ? 'bg-cathedral-500/10 text-cathedral-400' : 'bg-gold-500/10 text-gold-500'}`}>
+                        {item.status === 'processing' ? 'Sending' : item.status}
+                      </span>
+                    </div>
+                    {item.lastError && <p className="mt-1.5 text-[10px] leading-relaxed text-cathedral-400">{item.lastError}</p>}
+                    <p className="mt-1 text-[9px] text-theme-text-muted">Attempts: {item.attempts}</p>
                   </div>
                 ))}
               </div>
-            </div>
+            )}
 
-            <div className="pt-2 flex gap-2">
-              <motion.button
-                whileTap={{ scale: 0.96 }}
-                onClick={saveAttendance}
-                className="flex-1 py-2.5 rounded-pill bg-[#C8A45C] text-black font-extrabold text-xs cursor-pointer shadow-sm text-center"
-              >
-                Save Attendance
-              </motion.button>
+            <div className="flex gap-2">
+              {failedChanges > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void retryFailed()}
+                  disabled={!isOnline || isSyncing}
+                  className="flex-1 rounded-pill bg-cathedral-600 px-4 py-2.5 text-xs font-black text-white disabled:opacity-50"
+                >
+                  Retry rejected changes
+                </button>
+              )}
+              {failedChanges === 0 && pendingChanges > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void syncNow()}
+                  disabled={!isOnline || isSyncing}
+                  className="flex-1 rounded-pill bg-gold-500 px-4 py-2.5 text-xs font-black text-black disabled:opacity-50"
+                >
+                  {isSyncing ? 'Synchronizing…' : 'Synchronize now'}
+                </button>
+              )}
               <button
-                onClick={() => setShowAttendanceForm(false)}
-                className="px-4 py-2.5 rounded-pill bg-theme-text/5 text-theme-text-secondary font-bold text-xs cursor-pointer"
+                type="button"
+                onClick={() => setIsSyncStatusOpen(false)}
+                className="flex-1 rounded-pill bg-theme-bg-secondary px-4 py-2.5 text-xs font-black text-theme-text-secondary"
               >
-                Cancel
+                Close
               </button>
             </div>
           </div>

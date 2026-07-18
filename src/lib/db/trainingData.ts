@@ -15,8 +15,8 @@ import {
 import { useAuth } from './PocketBaseProvider';
 import { recordAuditEvent } from './auditEvents';
 
-let processingPromise: Promise<void> | null = null;
-let retryTimer: ReturnType<typeof setTimeout> | null = null;
+const processingByOwner = new Map<string, Promise<void>>();
+const retryTimersByOwner = new Map<string, ReturnType<typeof setTimeout>>();
 
 function displayName(record: RecordModel, key: string): string {
   const expanded = record.expand?.[key];
@@ -166,8 +166,9 @@ async function runAttendanceOutbox(pb: PocketBase, ownerId: string) {
   await db.outbox.where('ownerId').equals(ownerId)
     .filter((item) => item.command === 'training_check_in' && item.status === 'processing')
     .modify({ status: 'pending' });
+  const now = Date.now();
   const items = await db.outbox.where('ownerId').equals(ownerId)
-    .filter((item) => item.command === 'training_check_in' && item.status === 'pending')
+    .filter((item) => item.command === 'training_check_in' && item.status === 'pending' && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= now))
     .sortBy('createdAt');
   for (const item of items) {
     if (!item.id) continue;
@@ -188,11 +189,16 @@ async function runAttendanceOutbox(pb: PocketBase, ownerId: string) {
         nextAttemptAt: transient ? new Date(Date.now() + delay).toISOString() : undefined,
         updatedAt: new Date().toISOString()
       });
-      if (transient && status !== 401 && !retryTimer) {
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
+      if (!transient) {
+        const attendance = item.payload.attendance as unknown as TrainingAttendanceRecord;
+        await db.trainingAttendance.where('localId').equals(attendance.localId).modify({ syncStatus: 'failed' });
+      }
+      if (transient && status !== 401 && !retryTimersByOwner.has(ownerId)) {
+        const timer = setTimeout(() => {
+          retryTimersByOwner.delete(ownerId);
           if (pb.authStore.record?.id === ownerId) void processTrainingOutbox(pb, ownerId);
         }, delay);
+        retryTimersByOwner.set(ownerId, timer);
       }
       break;
     }
@@ -200,8 +206,13 @@ async function runAttendanceOutbox(pb: PocketBase, ownerId: string) {
 }
 
 export function processTrainingOutbox(pb: PocketBase, ownerId: string): Promise<void> {
-  if (!processingPromise) processingPromise = runAttendanceOutbox(pb, ownerId).finally(() => { processingPromise = null; });
-  return processingPromise;
+  const existing = processingByOwner.get(ownerId);
+  if (existing) return existing;
+  const processing = runAttendanceOutbox(pb, ownerId).finally(() => {
+    if (processingByOwner.get(ownerId) === processing) processingByOwner.delete(ownerId);
+  });
+  processingByOwner.set(ownerId, processing);
+  return processing;
 }
 
 function attendanceOutbox(ownerId: string, attendance: TrainingAttendanceRecord): OutboxRecord {

@@ -47,15 +47,16 @@ editing across many devices.
 |---|---|---|
 | Local database | Dexie/IndexedDB with scoped caches and dedicated outbox tables | Real, account-scoped support layer |
 | UI updates | Data facades combine confirmed server data with approved optimistic commands | Fast without treating every local row as canonical |
-| Synchronization | Cell operations and Academy attendance use durable idempotent outboxes | Connected; legacy adapter remains only for unmigrated paths |
+| Synchronization | A real account-scoped coordinator processes Cell and Academy idempotent outboxes | Connected; only PocketBase acknowledgement produces `synced` state |
 | Authentication | `PocketBaseProvider.tsx` uses PocketBase auth and refresh tokens | Server-authoritative |
 | Identity | PocketBase auth is the production identity and role source | Reconciled |
 | Saints Directory | Paginated privacy-safe view with scoped cache and server aggregate counts | Connected without exposing registry PII |
 | PocketBase hooks | Production collections, views, rules, and live bootstrap tests are versioned | Active |
 | Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
-The implementation now follows the selective local-first target below. Remaining legacy helpers
-must continue to be retired only after their consumers move to tested data facades.
+The implementation now follows the selective local-first target below. Production demo seeding and
+timer-based fake acknowledgement have been retired; remaining record metadata can be simplified
+after one compatibility release.
 
 ---
 
@@ -292,6 +293,10 @@ each record appears exactly once on a second device. A rejected command remains 
 attention` and is never falsely marked synced.
 
 ### Phase 5 — Retire simulation and reconcile legacy data (~0.5–1 day)
+
+**Implemented:** the global coordinator now reflects real account-scoped outbox state, preserves
+`churchconnect_sync_progress` as a compatibility event, exposes rejected operations for retry, and
+removes unscoped demo fixtures once without touching confirmed caches or queued work.
 
 - Replace `SyncEngine.ts` simulated completion with real request/outbox state.
 - Preserve existing `churchconnect_sync_progress` UI events through an adapter if still useful.
