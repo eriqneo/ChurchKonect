@@ -10,8 +10,6 @@ import {
   type TrainingEnrollmentRecord,
   type TrainingSessionRecord,
   type TrainingAttendanceRecord,
-  type PrayerRequestRecord,
-  type PrayerAssignmentRecord,
   type CellMeetingRecord,
   type CellAttendanceRecord,
   type CellReportRecord,
@@ -464,69 +462,6 @@ export async function seedDatabase() {
     }
   ];
   await db.trainingAttendance.bulkAdd(trainingAttendance);
-
-  // ==========================================
-  // F. SEED 3 PRAYER REQUESTS (1 Sensitive)
-  // ==========================================
-  const prayerRequests: PrayerRequestRecord[] = [
-    {
-      localId: 'prayer-1',
-      memberId: 'user-member-clara',
-      memberName: 'Sister Clara Oswald',
-      category: 'Healing',
-      content: 'I request healing prayer for my grandmother suffering from heavy arthritis pain. We believe in the Lord\'s healing touch!',
-      isSensitive: false,
-      urgency: 'high',
-      status: 'assigned',
-      syncStatus: 'synced',
-      createdAt: now,
-      updatedAt: now
-    },
-    {
-      localId: 'prayer-2',
-      memberId: 'mem-3',
-      memberName: 'John Doe',
-      category: 'Financial',
-      content: 'Going through a confidential job transition. Requesting pastoral prayers for family guidance and financial doors to open this week.',
-      isSensitive: true, // SENSITIVE (Accessible only to Lead Pastor & Admin)
-      urgency: 'medium',
-      status: 'submitted',
-      syncStatus: 'synced',
-      createdAt: now,
-      updatedAt: now
-    },
-    {
-      localId: 'prayer-3',
-      memberId: 'mem-4',
-      memberName: 'Evelyn Carter',
-      category: 'Family',
-      content: 'Giving thanks for a healthy baby boy! Requesting sealing blessing prayers for the newborn\'s growth and strength in the sanctuary.',
-      isSensitive: false,
-      urgency: 'low',
-      status: 'answered',
-      rhemaNotes: 'Isaiah 54:13 - All your children shall be taught by the Lord, and great shall be the peace of your children.',
-      syncStatus: 'synced',
-      createdAt: now,
-      updatedAt: now
-    }
-  ];
-  await db.prayerRequests.bulkAdd(prayerRequests);
-
-  // Prayer assignment for the assigned one
-  const prayerAssignments: PrayerAssignmentRecord[] = [
-    {
-      localId: 'assign-1',
-      requestId: 'prayer-1',
-      intercessorId: 'user-cell-leader-michael',
-      intercessorName: 'Michael Sterns',
-      prayerCount: 14,
-      status: 'active',
-      syncStatus: 'synced',
-      createdAt: now,
-      updatedAt: now
-    }
-  ];
-  await db.prayerAssignments.bulkAdd(prayerAssignments);
 
   // ==========================================
   // G. SEED CELL MEETINGS & REPORTS

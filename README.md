@@ -177,3 +177,26 @@ npm run backend:bootstrap-announcements -- --transport=curl
 
 The command prompts for both superuser credentials without echoing or storing them. The versioned
 schema is in `pb_migrations/202607182000_create_announcements.js`.
+
+## Prayer coordination
+
+Prayer petitions are server-first and are never retained as an offline IndexedDB cache. The
+canonical request is readable only by its submitter and pastoral managers. Assigned intercessors
+receive a separate privacy-safe assignment projection containing the prayer text and display name;
+for anonymous petitions that projection contains no submitter relation or member identifier.
+
+Administrators and the Lead Pastor triage, classify, assign, and archive requests. Intercessors can
+append prayer-watch events, add immutable rhema notes, and report an answered outcome only for
+their assigned petitions. Watch counts use unique append-only events so concurrent devices cannot
+overwrite one another. Prayer text, notes, outcomes, and count events cannot be edited or deleted by
+application clients.
+
+To reconcile the five collections and run disposable ownership, anonymity, assignment, and
+append-only workflow tests:
+
+```bash
+npm run backend:bootstrap-prayer -- --transport=curl
+```
+
+The command removes all disposable records and clears its superuser token. The versioned schema is
+in `pb_migrations/202607182230_create_prayer_coordination.js`.

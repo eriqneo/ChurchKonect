@@ -66,6 +66,7 @@ async function writeLocalAudit(user: AuthUser, action: string, details: string):
 
 async function clearLegacyIdentity(): Promise<void> {
   await db.appSettings.where('key').anyOf('activeSession', 'currentRole').delete();
+  await Promise.all([db.prayerRequests.clear(), db.prayerAssignments.clear()]);
 }
 
 export function PocketBaseProvider({ children }: { children: React.ReactNode }) {

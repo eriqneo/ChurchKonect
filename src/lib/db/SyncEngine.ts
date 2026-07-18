@@ -73,8 +73,6 @@ class SyncEngine {
       // Tables that track syncStatus
       const syncableTables = [
         db.members,
-        db.prayerRequests,
-        db.prayerAssignments,
         db.feedback
       ];
 
@@ -126,8 +124,6 @@ class SyncEngine {
     try {
       const tablesToSync = [
         { table: db.members, name: 'Members' },
-        { table: db.prayerRequests, name: 'Prayer Requests' },
-        { table: db.prayerAssignments, name: 'Prayer Assignments' },
         { table: db.feedback, name: 'Feedback' }
       ];
 

@@ -4,14 +4,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import * as Typography from '../../lib/theme/typography';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import { 
-  db, 
-  generateUUID, 
-  createLocalRecord,
-  type PrayerRequestRecord,
-  type PrayerAssignmentRecord,
+  db,
   type MemberRecord
 } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
+import { usePrayerData, type PrayerRequestView } from '../../lib/db/prayerData';
 import { 
   GlassCard, 
   AccentBadge, 
@@ -85,19 +82,27 @@ const CATEGORIES_MAP: { [key: string]: { label: string; icon: React.ReactNode; c
   'Other': { label: 'Other', icon: <HelpCircle className="w-3.5 h-3.5" />, color: 'gray' },
 };
 
-interface PrayerRequestRecordExtended extends PrayerRequestRecord {
-  isAnonymous?: boolean;
-  prayersOfferedCount?: number;
-  assignedTo?: string;
-  assignedToId?: string;
-  watchDuration?: number;
-  submitterAvatar?: string;
-  rhemaNotes?: any;
-}
+type PrayerRequestRecordExtended = PrayerRequestView;
+type PrayerCandidate = MemberRecord & { userId?: string };
 
 export function PrayerModule() {
   const { isDark } = useTheme();
   const { user: currentUser, role: currentRole } = useCurrentUser();
+  const {
+    requests: dbRequests,
+    assignments: dbAssignments,
+    isLoading,
+    isRefreshing,
+    error,
+    submitPrayer,
+    assignPrayers,
+    setUrgency,
+    archivePrayers,
+    incrementPrayer,
+    addNote,
+    markAnswered
+  } = usePrayerData();
+  const [isWorking, setIsWorking] = useState(false);
 
   // --------------------------------------
   // Simulated Roles & Dept controls (Oversight/Vigil controls)
@@ -105,6 +110,8 @@ export function PrayerModule() {
   const isIntercessoryWorker =
     currentRole?.id === 'lead_pastor' ||
     currentRole?.id === 'administrator' ||
+    currentRole?.id === 'cell_leader' ||
+    dbAssignments.some((assignment) => assignment.intercessorId === currentUser?.localId) ||
     currentRole?.department.toLowerCase().includes('intercess');
 
   const hasPrayerBankAccess = currentRole?.id === 'lead_pastor' || currentRole?.id === 'administrator' || isIntercessoryWorker;
@@ -126,50 +133,9 @@ export function PrayerModule() {
     }
   }, [activeTab, hasPrayerBankAccess, hasTriageAccess, currentRoleId, isIntercessoryWorker]);
 
-  // --------------------------------------
-  // Database Live Queries (Dexie)
-  // --------------------------------------
-  const dbRequests = useLiveQuery(async () => {
-    return await db.prayerRequests.toArray() as PrayerRequestRecordExtended[];
-  }, []);
-
-  const dbAssignments = useLiveQuery(async () => {
-    return await db.prayerAssignments.toArray();
-  }, []);
-
   const dbMembers = useLiveQuery(async () => {
-    return await db.members.toArray();
+    return await db.members.toArray() as PrayerCandidate[];
   }, []);
-
-  // --------------------------------------
-  // Intercessor active watch timer simulation
-  // --------------------------------------
-  const currentUserId = currentUser?.localId;
-  useEffect(() => {
-    if (activeTab !== 'bank' || !currentUserId) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const assignedRequests = await db.prayerRequests
-          .where('status')
-          .equals('assigned')
-          .toArray() as PrayerRequestRecordExtended[];
-        
-        for (const req of assignedRequests) {
-          if (req.assignedToId === currentUserId && req.id) {
-            const currentDuration = req.watchDuration || 0;
-            await db.prayerRequests.update(req.id, {
-              watchDuration: currentDuration + 1
-            } as any);
-          }
-        }
-      } catch (err) {
-        console.error('Error updating active watch duration:', err);
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeTab, currentUserId]);
 
   // --------------------------------------
   // State: Form Submissions (Member)
@@ -253,39 +219,16 @@ export function PrayerModule() {
     }
 
     playHaptic([15, 65, 15]);
-
-    // Insert request in Dexie DB
-    const newRequest = createLocalRecord<PrayerRequestRecord>({
-      memberId: currentUser.localId,
-      memberName: isAnonymous ? 'Anonymous' : currentUser.name,
-      category: selectedCategory,
-      content: prayerText.trim(),
-      isSensitive: false, // Default sensitive setting
-      urgency: 'low',     // Default low urgency (translates to normal)
-      status: 'submitted',
-      // Custom attributes stored directly in Dexie
-      isAnonymous: isAnonymous,
-      prayersOfferedCount: 0,
-      rhemaNotes: [],
-      watchDuration: 0,
-      submitterAvatar: isAnonymous ? '??' : currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
-    } as any);
-
-    await db.prayerRequests.add(newRequest);
-
-    // Audit logs entry
-    await db.auditLogs.add({
-      localId: generateUUID(),
-      userId: currentUser.localId,
-      userName: isAnonymous ? 'Anonymous Member' : currentUser.name,
-      action: 'prayer_submitted',
-      details: `Submitted ${selectedCategory} prayer request`,
-      createdAt: new Date().toISOString()
-    });
-
-    // Pulse animation triggers
-    setShowPulseAnimation(true);
-    setIsSubmitted(true);
+    setIsWorking(true);
+    try {
+      await submitPrayer(selectedCategory, prayerText, isAnonymous);
+      setShowPulseAnimation(true);
+      setIsSubmitted(true);
+    } catch (submitError) {
+      triggerToast(submitError instanceof Error ? submitError.message : 'Could not submit this prayer request.');
+    } finally {
+      setIsWorking(false);
+    }
   };
 
   const resetForm = () => {
@@ -324,21 +267,10 @@ export function PrayerModule() {
       }));
     }, 450);
 
-    // Update prayer requests counts
-    const record = await db.prayerRequests.where('localId').equals(requestId).first();
-    if (record) {
-      const currentCount = (record as any).prayersOfferedCount || 0;
-      await db.prayerRequests.update(record.id!, {
-        prayersOfferedCount: currentCount + 1
-      } as any);
-
-      // Log in assignment watch too if active
-      const assign = await db.prayerAssignments.where('requestId').equals(requestId).first();
-      if (assign) {
-        await db.prayerAssignments.update(assign.id!, {
-          prayerCount: (assign.prayerCount || 0) + 1
-        });
-      }
+    try {
+      await incrementPrayer(requestId);
+    } catch (incrementError) {
+      triggerToast(incrementError instanceof Error ? incrementError.message : 'Could not record this prayer watch.');
     }
   };
 
@@ -350,25 +282,16 @@ export function PrayerModule() {
     if (!text || !text.trim()) return;
 
     playHaptic(15);
-    const record = await db.prayerRequests.where('localId').equals(requestId).first();
-    if (record) {
-      const existingNotes = (record as any).rhemaNotes || [];
-      const updatedNotes = [
-        { 
-          id: generateUUID(), 
-          text: text.trim(), 
-          timestamp: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' · Just now'
-        },
-        ...existingNotes
-      ];
-
-      await db.prayerRequests.update(record.id!, {
-        rhemaNotes: updatedNotes
-      } as any);
-
+    setIsWorking(true);
+    try {
+      await addNote(requestId, text);
       setNoteTextMap(prev => ({ ...prev, [requestId]: '' }));
       setExpandedNoteId(null);
       triggerToast('Rhema note recorded on prayer scroll.');
+    } catch (noteError) {
+      triggerToast(noteError instanceof Error ? noteError.message : 'Could not save this intercessory note.');
+    } finally {
+      setIsWorking(false);
     }
   };
 
@@ -380,37 +303,17 @@ export function PrayerModule() {
     setConfirmAnsweredRequest(null);
     setSealingId(prayer.localId);
 
-    // Wait 900ms for seal contract animation to finish
-    setTimeout(async () => {
-      const record = await db.prayerRequests.where('localId').equals(prayer.localId).first();
-      if (record) {
-        await db.prayerRequests.update(record.id!, {
-          status: 'answered'
-        });
-
-        // Notify submitter
-        await db.notifications.add({
-          localId: generateUUID(),
-          userId: record.memberId,
-          type: 'prayer',
-          title: 'Answered Prayer Testimony! 🙏',
-          message: `Your prayer for ${record.category} has been marked as answered! Our intercessors celebrate with you.`,
-          isRead: false,
-          createdAt: new Date().toISOString()
-        });
-
-        // Update corresponding assignments status
-        const assignments = await db.prayerAssignments.where('requestId').equals(prayer.localId).toArray();
-        for (const assign of assignments) {
-          await db.prayerAssignments.update(assign.id!, {
-            status: 'completed'
-          });
-        }
-
-        triggerToast('Testimony sealed! Original submitter notified.');
-        setSealingId(null);
-      }
-    }, 900);
+    setIsWorking(true);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    try {
+      await markAnswered(prayer.localId);
+      triggerToast('Testimony sealed for the original submitter.');
+    } catch (answerError) {
+      triggerToast(answerError instanceof Error ? answerError.message : 'Could not mark this prayer as answered.');
+    } finally {
+      setSealingId(null);
+      setIsWorking(false);
+    }
   };
 
   // --------------------------------------
@@ -434,78 +337,43 @@ export function PrayerModule() {
     if (selectedIntercessorIds.length === 0) return;
 
     playHaptic(25);
-    const targetPrayers = assignTargetRequest ? [assignTargetRequest] : dbRequests?.filter(p => selectedRequestIds.includes(p.localId)) || [];
-    const intercessors = (dbMembers || []).filter(m => selectedIntercessorIds.includes(m.localId));
+    const targetIds = assignTargetRequest ? [assignTargetRequest.localId] : selectedRequestIds;
+    const intercessors = (dbMembers || [])
+      .map((member) => ({ userId: member.userId || '', name: member.fullName }))
+      .filter((member) => member.userId && selectedIntercessorIds.includes(member.userId));
 
-    for (const prayer of targetPrayers) {
-      const existingAssignments = await db.prayerAssignments.where('requestId').equals(prayer.localId).toArray();
-      const alreadyAssignedIds = new Set(existingAssignments.map(a => a.intercessorId));
-
-      for (const intercessor of intercessors) {
-        if (alreadyAssignedIds.has(intercessor.localId)) continue;
-
-        // Create assignment
-        const newAssign = createLocalRecord<PrayerAssignmentRecord>({
-          requestId: prayer.localId,
-          intercessorId: intercessor.localId,
-          intercessorName: intercessor.fullName,
-          prayerCount: 0,
-          status: 'active'
-        });
-        await db.prayerAssignments.add(newAssign);
-
-        // Add intercessor notification
-        await db.notifications.add({
-          localId: generateUUID(),
-          userId: intercessor.localId,
-          type: 'prayer',
-          title: 'New Altar Watch Assigned',
-          message: `You are assigned to watch over a ${prayer.category} petition.`,
-          isRead: false,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // Update prayer status with the full current roster of assignees
-      const allAssignments = await db.prayerAssignments.where('requestId').equals(prayer.localId).toArray();
-      const record = await db.prayerRequests.where('localId').equals(prayer.localId).first();
-      if (record) {
-        await db.prayerRequests.update(record.id!, {
-          status: 'assigned',
-          // Store direct attributes for quick display
-          assignedTo: allAssignments.map(a => a.intercessorName).join(', '),
-          assignedToId: allAssignments[0]?.intercessorId
-        } as any);
-      }
+    setIsWorking(true);
+    try {
+      await assignPrayers(targetIds, intercessors);
+      triggerToast(`Watch assigned to ${intercessors.map((item) => item.name).join(', ')}.`);
+      setAssignTargetRequest(null);
+      setSelectedRequestIds([]);
+      setSelectedIntercessorIds([]);
+    } catch (assignmentError) {
+      triggerToast(assignmentError instanceof Error ? assignmentError.message : 'Could not assign this prayer watch.');
+    } finally {
+      setIsWorking(false);
     }
-
-    const names = intercessors.map(i => i.fullName).join(', ');
-    triggerToast(`Watch assigned to ${names}.`);
-    setAssignTargetRequest(null);
-    setSelectedRequestIds([]);
-    setSelectedIntercessorIds([]);
   };
 
   const handleSetUrgency = async (requestId: string, urgency: 'Normal' | 'Urgent' | 'Critical') => {
     playHaptic(10);
-    const record = await db.prayerRequests.where('localId').equals(requestId).first();
-    if (record) {
-      const dbUrgency = urgency === 'Normal' ? 'low' : urgency === 'Urgent' ? 'medium' : 'high';
-      await db.prayerRequests.update(record.id!, {
-        urgency: dbUrgency
-      } as any);
+    const dbUrgency = urgency === 'Normal' ? 'low' : urgency === 'Urgent' ? 'medium' : 'high';
+    try {
+      await setUrgency(requestId, dbUrgency);
       triggerToast(`Urgency set to ${urgency}.`);
+    } catch (urgencyError) {
+      triggerToast(urgencyError instanceof Error ? urgencyError.message : 'Could not update prayer urgency.');
     }
   };
 
   const handleArchiveRequest = async (requestId: string) => {
     playHaptic(20);
-    const record = await db.prayerRequests.where('localId').equals(requestId).first();
-    if (record) {
-      await db.prayerRequests.update(record.id!, {
-        status: 'sealed' // archived state
-      });
+    try {
+      await archivePrayers([requestId]);
       triggerToast('Prayer request moved to archived sanctuary.');
+    } catch (archiveError) {
+      triggerToast(archiveError instanceof Error ? archiveError.message : 'Could not archive this prayer request.');
     }
   };
 
@@ -519,16 +387,13 @@ export function PrayerModule() {
 
   const handleBulkArchive = async () => {
     playHaptic([20, 50]);
-    for (const reqId of selectedRequestIds) {
-      const record = await db.prayerRequests.where('localId').equals(reqId).first();
-      if (record) {
-        await db.prayerRequests.update(record.id!, {
-          status: 'sealed'
-        });
-      }
+    try {
+      await archivePrayers(selectedRequestIds);
+      triggerToast(`Archived ${selectedRequestIds.length} requests.`);
+      setSelectedRequestIds([]);
+    } catch (archiveError) {
+      triggerToast(archiveError instanceof Error ? archiveError.message : 'Could not archive the selected prayer requests.');
     }
-    triggerToast(`Archived ${selectedRequestIds.length} requests.`);
-    setSelectedRequestIds([]);
   };
 
   // --------------------------------------
@@ -611,9 +476,8 @@ export function PrayerModule() {
 
   // Active assignments for the logged-in intercessor (checks every co-assignee, not just the primary one)
   const myAssignments = dbRequests?.filter(p =>
-    p.status === 'assigned' && (
-      (p as any).assignedToId === currentUser.localId ||
-      dbAssignments?.some(a => a.requestId === p.localId && a.intercessorId === currentUser.localId)
+    p.status === 'assigned' && dbAssignments?.some(
+      a => a.requestId === p.localId && a.intercessorId === currentUser.localId && a.status === 'active'
     )
   ) || [];
 
@@ -659,6 +523,15 @@ export function PrayerModule() {
 
   return (
     <div className={`-mx-4 -mt-24 px-4 pt-24 pb-32 min-h-[820px] transition-colors duration-500 relative overflow-hidden select-none ${containerBgClass}`}>
+      {(isLoading || isRefreshing || error) && (
+        <div className={`no-print relative z-20 mb-3 rounded-xl border px-3 py-2 text-[11px] font-semibold ${
+          error
+            ? 'border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+            : 'border-gold-500/15 bg-white/40 dark:bg-black/20 text-text-secondary'
+        }`}>
+          {error || (isLoading ? 'Loading authorized prayer records…' : 'Refreshing prayer records…')}
+        </div>
+      )}
       
       {/* Dynamic Sacred Ambient Gradients for Contemplative Views */}
       {isAltThemeScreen && (
@@ -901,10 +774,11 @@ export function PrayerModule() {
                   <button
                     id="btn-submit-prayer"
                     type="submit"
-                    className="w-full h-12 rounded-full bg-gold-500 hover:bg-gold-400 text-black font-black text-sm tracking-widest uppercase flex items-center justify-center gap-2 shadow-md hover:scale-[1.01] transition-all duration-300"
+                    disabled={isWorking}
+                    className="w-full h-12 rounded-full bg-gold-500 hover:bg-gold-400 disabled:opacity-60 disabled:cursor-wait text-black font-black text-sm tracking-widest uppercase flex items-center justify-center gap-2 shadow-md hover:scale-[1.01] transition-all duration-300"
                   >
                     <Send className="w-4 h-4 stroke-[2.5]" />
-                    Send Prayer
+                    {isWorking ? 'Sending…' : 'Send Prayer'}
                   </button>
 
                 </form>
@@ -1955,37 +1829,39 @@ export function PrayerModule() {
           {/* List of candidates */}
           <div className="space-y-1 max-h-[300px] overflow-y-auto pr-1">
             {dbMembers?.filter(member => {
+              if (!member.userId) return false;
               if (intercessorDeptFilter === 'All') return true;
               if (intercessorDeptFilter === 'Intercessory') {
                 // Return cell leaders, pastors, or specific intercessor roles
-                return member.role === 'cell_leader' || member.role === 'pastor' || member.role === 'lead_pastor';
+                return member.role === 'cell_leader' || member.role === 'district_pastor' || member.role === 'lead_pastor';
               }
               if (intercessorDeptFilter === 'Pastoral') {
-                return member.role === 'pastor' || member.role === 'lead_pastor';
+                return member.role === 'district_pastor' || member.role === 'lead_pastor';
               }
               return true;
             }).map((intercessor) => {
+              const intercessorUserId = intercessor.userId!;
               // Calculate active watch count
-              const assignmentCount = dbRequests?.filter(p => p.status === 'assigned' && (p as any).assignedToId === intercessor.localId).length || 0;
+              const assignmentCount = dbAssignments.filter((assignment) => assignment.status === 'active' && assignment.intercessorId === intercessorUserId).length;
               const availabilityLabel = assignmentCount >= 4 ? 'Busy watchman' : 'Ready Watchman';
 
               const alreadyAssigned = !!assignTargetRequest && dbAssignments?.some(
-                a => a.requestId === assignTargetRequest.localId && a.intercessorId === intercessor.localId
+                a => a.requestId === assignTargetRequest.localId && a.intercessorId === intercessorUserId
               );
-              const isChecked = alreadyAssigned || selectedIntercessorIds.includes(intercessor.localId);
+              const isChecked = alreadyAssigned || selectedIntercessorIds.includes(intercessorUserId);
 
               return (
                 <ContentRow
                   key={intercessor.localId}
                   title={intercessor.fullName}
                   subtitle={alreadyAssigned ? 'Already watching this request' : `${assignmentCount} Active watches · ${availabilityLabel}`}
-                  onPress={alreadyAssigned ? undefined : () => toggleIntercessorSelection(intercessor.localId)}
+                  onPress={alreadyAssigned ? undefined : () => toggleIntercessorSelection(intercessorUserId)}
                   action={
                     <motion.button
                       id={`btn-select-intercessor-${intercessor.localId}`}
                       whileTap={alreadyAssigned ? undefined : { scale: 0.9 }}
                       disabled={alreadyAssigned}
-                      onClick={() => toggleIntercessorSelection(intercessor.localId)}
+                      onClick={() => toggleIntercessorSelection(intercessorUserId)}
                       className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${
                         isChecked
                           ? 'bg-gold-500 border-gold-500 text-black'
@@ -2010,11 +1886,11 @@ export function PrayerModule() {
           <motion.button
             id="btn-confirm-assignment"
             whileTap={selectedIntercessorIds.length > 0 ? { scale: 0.97 } : undefined}
-            disabled={selectedIntercessorIds.length === 0}
+            disabled={selectedIntercessorIds.length === 0 || isWorking}
             onClick={handleExecuteAssignment}
             className="w-full py-3 rounded-pill bg-gold-500 disabled:bg-white/10 text-black disabled:text-text-muted font-extrabold text-sm uppercase tracking-wider transition-colors disabled:cursor-not-allowed"
           >
-            {selectedIntercessorIds.length > 0
+            {isWorking ? 'Assigning…' : selectedIntercessorIds.length > 0
               ? `Assign to ${selectedIntercessorIds.length} Intercessor${selectedIntercessorIds.length > 1 ? 's' : ''}`
               : 'Select Intercessors to Assign'}
           </motion.button>
