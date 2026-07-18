@@ -196,6 +196,22 @@ export interface TrainingCertificateRecord extends LocalFirstRecord {
   verifiedAt?: string;
 }
 
+export interface AnnouncementRecord extends LocalFirstRecord {
+  title: string;
+  body: string;
+  author: string;
+  authorId: string;
+  roleLabel: string;
+  tag: 'General' | 'Urgent' | 'Event' | 'Reminder';
+  pinned: boolean;
+  publishAt: string;
+  expiresAt?: string;
+  eventDate?: string;
+  eventTime?: string;
+  eventLocation?: string;
+  backendStatus: 'published' | 'archived';
+}
+
 export interface PrayerRequestRecord extends LocalFirstRecord {
   memberId: string;
   memberName: string;
@@ -276,6 +292,7 @@ export class ChurchConnectDB extends Dexie {
   trainingEnrollments!: Table<TrainingEnrollmentRecord, number>;
   trainingAttendance!: Table<TrainingAttendanceRecord, number>;
   trainingCertificates!: Table<TrainingCertificateRecord, number>;
+  announcements!: Table<AnnouncementRecord, number>;
   prayerRequests!: Table<PrayerRequestRecord, number>;
   prayerAssignments!: Table<PrayerAssignmentRecord, number>;
   intercessoryTeams!: Table<IntercessoryTeamRecord, number>;
@@ -323,6 +340,10 @@ export class ChurchConnectDB extends Dexie {
       trainingEnrollments: '++id, localId, remoteId, trainingId, memberId, status, syncStatus, cacheOwnerId',
       trainingAttendance: '++id, localId, remoteId, sessionId, memberId, timing, syncStatus, cacheOwnerId',
       trainingCertificates: '++id, localId, remoteId, trainingId, memberId, status, certificateNumber, syncStatus, cacheOwnerId'
+    });
+
+    this.version(4).stores({
+      announcements: '++id, &localId, remoteId, tag, pinned, publishAt, expiresAt, backendStatus, syncStatus, cacheOwnerId'
     });
   }
 }

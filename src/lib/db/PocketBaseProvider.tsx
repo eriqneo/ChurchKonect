@@ -140,7 +140,7 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
         db.members, db.departments, db.sections, db.cellGroups,
         db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports,
         db.trainings, db.trainingSessions, db.trainingEnrollments,
-        db.trainingAttendance, db.trainingCertificates
+        db.trainingAttendance, db.trainingCertificates, db.announcements
       ], async () => {
         await Promise.all([
           db.members.filter((record) => Boolean(record.remoteId)).delete(),
@@ -155,7 +155,8 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
           db.trainingSessions.filter((record) => record.syncStatus === 'synced').delete(),
           db.trainingEnrollments.filter((record) => record.syncStatus === 'synced').delete(),
           db.trainingAttendance.filter((record) => record.syncStatus === 'synced').delete(),
-          db.trainingCertificates.filter((record) => record.syncStatus === 'synced').delete()
+          db.trainingCertificates.filter((record) => record.syncStatus === 'synced').delete(),
+          db.announcements.filter((record) => record.syncStatus === 'synced').delete()
         ]);
       });
       setUser(null);

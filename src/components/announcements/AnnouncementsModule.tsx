@@ -9,7 +9,7 @@ import {
   X, 
   Plus, 
   MoreVertical, 
-  Trash2, 
+  Archive,
   Copy, 
   Edit3, 
   PinOff,
@@ -24,90 +24,8 @@ import {
 import { GlassCard, AccentBadge, SectionTitle, BottomSheet } from '../shared';
 import * as Typography from '../../lib/theme/typography';
 import { useToast } from '../shared/toast/useToast';
-import { useNotificationSystem } from '../../lib/notifications/pwaService';
+import { useAnnouncementsData, type AnnouncementView as Announcement } from '../../lib/db/announcementData';
 import { exportToIcs, buildGoogleCalendarUrl, copyEventDetails } from './CalendarExport';
-
-interface Announcement {
-  id: string;
-  title: string;
-  body: string;
-  author: string;
-  roleLabel: string;
-  timestamp: string;
-  tag: 'General' | 'Urgent' | 'Event' | 'Reminder';
-  pinned: boolean;
-  createdAt: number;
-  
-  // Event details
-  eventDate?: string; // YYYY-MM-DD
-  eventTime?: string; // HH:MM
-  eventLocation?: string;
-  
-  // Expiry date
-  expiryDate?: string; // YYYY-MM-DD
-  
-  // Schedule date
-  scheduledDate?: string; // YYYY-MM-DD
-  scheduledTime?: string; // HH:MM
-  status: 'Active' | 'Scheduled' | 'Expired';
-}
-
-const DEFAULT_ANNOUNCEMENTS: Announcement[] = [
-  {
-    id: 'ann-1',
-    title: 'Holy Convocation 2026: Divine Awakening',
-    body: 'We are thrilled to announce our annual **Holy Convocation 2026**. Join us for 3 days of powerful teachings, fervent prayers, and celestial worship. Guest speakers from all regional districts will be present. Do not miss this divine appointment! Special workshops will be held for Cell leaders and ministers. Learn more on our [Website](https://example.com/convocation).',
-    author: 'Pastor David',
-    roleLabel: 'Lead Pastor',
-    timestamp: '2 hours ago',
-    tag: 'Event',
-    pinned: true,
-    createdAt: Date.now() - 2 * 3600 * 1000,
-    eventDate: '2026-07-12',
-    eventTime: '09:00',
-    eventLocation: 'Main Sanctuary',
-    status: 'Active'
-  },
-  {
-    id: 'ann-2',
-    title: 'Urgent Prayer Request: Global Intercession',
-    body: 'The church council is calling for a special *24-hour prayer chain* this Saturday for global missions and cell strength. Please sign up for a 1-hour slot at the Hope Cell center or online. Let\'s cover our sister churches and local saints with continuous intercessory prayers.',
-    author: 'Sarah Jenkins',
-    roleLabel: 'Administrator',
-    timestamp: 'Yesterday',
-    tag: 'Urgent',
-    pinned: false,
-    createdAt: Date.now() - 24 * 3600 * 1000,
-    status: 'Active'
-  },
-  {
-    id: 'ann-3',
-    title: 'Certificate Ceremony: Discipleship Academy',
-    body: 'Congratulations to all the graduates of Class 4 of our **Christian Leadership Course**! The certificate ceremony will be held this Sunday during the second service. Please arrive 30 minutes early for robing and final photos.',
-    author: 'Sister Grace',
-    roleLabel: 'Department Head',
-    timestamp: '2 days ago',
-    tag: 'General',
-    pinned: false,
-    createdAt: Date.now() - 48 * 3600 * 1000,
-    status: 'Active'
-  },
-  {
-    id: 'ann-4',
-    title: 'Youth Retreat: Relentless Fire',
-    body: 'Get ready for **Youth Retreat 2026**! Early bird registrations are open. High-energy activities, worship sessions, and team-building camps. Sign up now!',
-    author: 'Pastor David',
-    roleLabel: 'Lead Pastor',
-    timestamp: '3 days ago',
-    tag: 'Event',
-    pinned: false,
-    createdAt: Date.now() - 72 * 3600 * 1000,
-    eventDate: '2026-08-15',
-    eventTime: '08:00',
-    eventLocation: 'Galilee Campgrounds',
-    status: 'Active'
-  }
-];
 
 interface AnnouncementsModuleProps {
   currentRole: {
@@ -120,7 +38,16 @@ interface AnnouncementsModuleProps {
 
 export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
   const toast = useToast();
-  const { triggerMockNotification } = useNotificationSystem();
+  const {
+    announcements,
+    isLoading,
+    isRefreshing,
+    error,
+    saveAnnouncement,
+    archiveAnnouncement,
+    setPinned
+  } = useAnnouncementsData();
+  const [isSaving, setIsSaving] = useState(false);
 
   // Calendar Sheet & Saved States
   const [isCalendarSheetOpen, setIsCalendarSheetOpen] = useState(false);
@@ -140,19 +67,6 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
   useEffect(() => {
     localStorage.setItem('churchconnect_added_events', JSON.stringify(addedEventIds));
   }, [addedEventIds]);
-  const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
-    const saved = localStorage.getItem('churchconnect_announcements');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Clean/calculate statuses dynamically on load
-        return parsed.map((ann: Announcement) => refreshStatus(ann));
-      } catch (e) {
-        return DEFAULT_ANNOUNCEMENTS;
-      }
-    }
-    return DEFAULT_ANNOUNCEMENTS;
-  });
 
   // Basic Form States
   const [isNewFormOpen, setIsNewFormOpen] = useState(false);
@@ -183,6 +97,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
   const [activeFilter, setActiveFilter] = useState<string>('All'); // Member View
   const [adminTab, setAdminTab] = useState<'Active' | 'Scheduled' | 'Expired'>('Active'); // Admin View
   const [showMemberFilters, setShowMemberFilters] = useState(false); // Toggle Member Filters
+  const [, setClockTick] = useState(0);
   
   // Inline expansion
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -190,39 +105,21 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
   // Helper to dynamically calculate announcement status based on date/time
   function refreshStatus(ann: Announcement): Announcement {
     const now = Date.now();
-    
-    // Check Expiry (expiryDate: YYYY-MM-DD, end of day)
-    if (ann.expiryDate) {
-      const expDateTime = new Date(`${ann.expiryDate}T23:59:59`).getTime();
-      if (!isNaN(expDateTime) && now > expDateTime) {
-        return { ...ann, status: 'Expired' };
-      }
+    const expiry = ann.expiresAt ? new Date(ann.expiresAt).getTime() : Number.POSITIVE_INFINITY;
+    if (expiry <= now) {
+      return { ...ann, status: 'Expired' };
     }
-    
-    // Check Scheduling
-    if (ann.scheduledDate) {
-      const sTime = ann.scheduledTime || '00:00';
-      const schedDateTime = new Date(`${ann.scheduledDate}T${sTime}`).getTime();
-      if (!isNaN(schedDateTime) && now < schedDateTime) {
-        return { ...ann, status: 'Scheduled' };
-      }
+    const publish = new Date(ann.publishAt).getTime();
+    if (publish > now) {
+      return { ...ann, status: 'Scheduled' };
     }
-    
     return { ...ann, status: 'Active' };
   }
 
-  // Periodic status refresh
   useEffect(() => {
-    const interval = setInterval(() => {
-      setAnnouncements(prev => prev.map(ann => refreshStatus(ann)));
-    }, 30000); // refresh every 30 seconds
+    const interval = setInterval(() => setClockTick((value) => value + 1), 30000);
     return () => clearInterval(interval);
   }, []);
-
-  // Save to localStorage when announcements change
-  useEffect(() => {
-    localStorage.setItem('churchconnect_announcements', JSON.stringify(announcements));
-  }, [announcements]);
 
   const triggerHaptic = () => {
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -275,34 +172,50 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
     setIsNewFormOpen(true);
   };
 
-  const handleDuplicate = (ann: Announcement) => {
+  const handleDuplicate = async (ann: Announcement) => {
     triggerHaptic();
     setOpenMenuId(null);
-    const duplicated: Announcement = {
-      ...ann,
-      id: `ann-${Date.now()}`,
-      title: `${ann.title} (Copy)`,
-      createdAt: Date.now(),
-      timestamp: 'Just now'
-    };
-    setAnnouncements(prev => [duplicated, ...prev]);
-    toast.success('Announcement duplicated!');
+    setIsSaving(true);
+    try {
+      await saveAnnouncement({
+        title: `${ann.title} (Copy)`, body: ann.body, tag: ann.tag, pinned: false,
+        eventDate: ann.eventDate, eventTime: ann.eventTime, eventLocation: ann.eventLocation,
+        expiryDate: ann.expiryDate
+      });
+      toast.success('Announcement duplicated and published.');
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : 'Could not duplicate this announcement.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleArchive = async (ann: Announcement) => {
     triggerHaptic();
     setOpenMenuId(null);
-    setAnnouncements(prev => prev.filter(ann => ann.id !== id));
-    toast.success('Announcement deleted');
+    setIsSaving(true);
+    try {
+      await archiveAnnouncement(ann);
+      toast.success('Announcement archived.');
+    } catch (archiveError) {
+      toast.error(archiveError instanceof Error ? archiveError.message : 'Could not archive this announcement.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleTogglePin = (ann: Announcement) => {
+  const handleTogglePin = async (ann: Announcement) => {
     triggerHaptic();
     setOpenMenuId(null);
-    setAnnouncements(prev => prev.map(item => 
-      item.id === ann.id ? { ...item, pinned: !item.pinned } : item
-    ));
-    toast.success(ann.pinned ? 'Announcement unpinned' : 'Announcement pinned to top');
+    setIsSaving(true);
+    try {
+      await setPinned(ann, !ann.pinned);
+      toast.success(ann.pinned ? 'Announcement unpinned.' : 'Announcement pinned to top.');
+    } catch (pinError) {
+      toast.error(pinError instanceof Error ? pinError.message : 'Could not update this announcement.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const insertFormat = (formatType: 'bold' | 'italic' | 'link') => {
@@ -334,7 +247,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
     triggerHaptic();
   };
 
-  const handlePublish = (e: React.FormEvent, isSaveScheduled: boolean) => {
+  const handlePublish = async (e: React.FormEvent, isSaveScheduled: boolean) => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) {
       toast.warning('Please fill in all required fields');
@@ -351,76 +264,36 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
       return;
     }
 
-    // Determine Status
-    let finalStatus: 'Active' | 'Scheduled' | 'Expired' = 'Active';
-    if (isSaveScheduled) {
-      finalStatus = 'Scheduled';
-    } else if (expiryDate) {
-      const expTime = new Date(`${expiryDate}T23:59:59`).getTime();
-      if (Date.now() > expTime) {
-        finalStatus = 'Expired';
-      }
+    const existing = editingId ? announcements.find((ann) => ann.id === editingId) : undefined;
+    if (editingId && !existing) {
+      toast.error('This announcement is no longer available.');
+      return;
     }
 
-    if (editingId) {
-      // Edit Mode
-      setAnnouncements(prev => prev.map(ann => {
-        if (ann.id === editingId) {
-          const updated: Announcement = {
-            ...ann,
-            title: title.trim(),
-            body: body.trim(),
-            tag: selectedTag,
-            pinned: isPinned,
-            eventDate: selectedTag === 'Event' ? eventDate : undefined,
-            eventTime: selectedTag === 'Event' ? eventTime : undefined,
-            eventLocation: selectedTag === 'Event' ? eventLocation : undefined,
-            expiryDate: expiryDate || undefined,
-            scheduledDate: isSaveScheduled ? schedDate : undefined,
-            scheduledTime: isSaveScheduled ? schedTime : undefined,
-            status: finalStatus
-          };
-          return refreshStatus(updated);
-        }
-        return ann;
-      }));
-      toast.success('Announcement updated successfully!');
-    } else {
-      // New Mode
-      const newAnn: Announcement = {
-        id: `ann-${Date.now()}`,
-        title: title.trim(),
-        body: body.trim(),
-        author: currentRole.name,
-        roleLabel: currentRole.label,
-        timestamp: 'Just now',
+    setIsSaving(true);
+    try {
+      await saveAnnouncement({
+        title,
+        body,
         tag: selectedTag,
         pinned: isPinned,
-        createdAt: Date.now(),
         eventDate: selectedTag === 'Event' ? eventDate : undefined,
         eventTime: selectedTag === 'Event' ? eventTime : undefined,
         eventLocation: selectedTag === 'Event' ? eventLocation : undefined,
         expiryDate: expiryDate || undefined,
         scheduledDate: isSaveScheduled ? schedDate : undefined,
-        scheduledTime: isSaveScheduled ? schedTime : undefined,
-        status: finalStatus
-      };
-      
-      setAnnouncements(prev => [refreshStatus(newAnn), ...prev]);
-      toast.success(isSaveScheduled ? 'Announcement scheduled!' : 'Announcement published!');
-      
-      // Trigger WebPush Notification when a new Active announcement is published
-      if (finalStatus === 'Active') {
-        triggerMockNotification('📢 New Announcement', newAnn.title.substring(0, 60));
-      }
-      
-      // Notify other parts of the app
-      const event = new CustomEvent('new_church_announcement', { detail: newAnn });
-      window.dispatchEvent(event);
+        scheduledTime: isSaveScheduled ? schedTime : undefined
+      }, existing);
+      toast.success(editingId
+        ? 'Announcement updated successfully.'
+        : isSaveScheduled ? 'Announcement scheduled.' : 'Announcement published.');
+      setIsNewFormOpen(false);
+      triggerHaptic();
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : 'Could not save this announcement.');
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsNewFormOpen(false);
-    triggerHaptic();
   };
 
   const toggleExpand = (id: string) => {
@@ -561,7 +434,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
     return [...list].sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
-      return b.createdAt - a.createdAt;
+      return b.createdAtMs - a.createdAtMs;
     });
   };
 
@@ -591,6 +464,15 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
 
   return (
     <div className="space-y-4">
+      {(isLoading || error || isRefreshing) && (
+        <div className={`rounded-xl border px-3 py-2 text-[11px] font-semibold ${
+          error
+            ? 'border-cathedral-500/25 bg-cathedral-500/5 text-cathedral-600 dark:text-cathedral-300'
+            : 'border-theme-border bg-theme-bg-secondary text-theme-text-muted'
+        }`}>
+          {error || (isLoading ? 'Loading saved announcements…' : 'Refreshing announcements…')}
+        </div>
+      )}
       {/* ==========================================
           ADMIN / PASTOR VIEW
           ========================================== */}
@@ -680,7 +562,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
                           </h4>
 
                           <p className="text-[10px] text-theme-text-muted font-bold font-mono uppercase">
-                            Published {ann.timestamp || formatPublishedDate(ann.createdAt)} · By {ann.author} ({ann.roleLabel})
+                            Published {ann.timestamp || formatPublishedDate(ann.createdAtMs)} · By {ann.author} ({ann.roleLabel})
                           </p>
                         </div>
 
@@ -749,12 +631,12 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
                                   <div className="border-t border-theme-border my-1" />
 
                                   <button
-                                    id={`menu-delete-${ann.id}`}
-                                    onClick={() => handleDelete(ann.id)}
+                                    id={`menu-archive-${ann.id}`}
+                                    onClick={() => void handleArchive(ann)}
                                     className="w-full px-4 py-2 text-left text-xs font-bold text-cathedral-500 hover:bg-cathedral-500/10 flex items-center gap-2 transition-colors cursor-pointer"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span>Delete</span>
+                                    <Archive className="w-3.5 h-3.5" />
+                                    <span>Archive</span>
                                   </button>
                                 </motion.div>
                               </>
@@ -948,7 +830,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
 
                           {/* Author Caption */}
                           <p className={`${Typography.CAPTION} text-theme-text-muted font-bold font-mono uppercase`}>
-                            Published by: {ann.author} · {ann.timestamp || formatPublishedDate(ann.createdAt)}
+                            Published by: {ann.author} · {ann.timestamp || formatPublishedDate(ann.createdAtMs)}
                           </p>
                         </div>
 
@@ -1325,19 +1207,21 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
               <button
                 id="form-publish-now-btn"
                 type="submit"
-                className="w-full h-12 bg-gold-500 hover:bg-gold-600 text-black font-black tracking-wider text-xs rounded-button transition-colors shadow-lg cursor-pointer flex items-center justify-center gap-2"
+                disabled={isSaving}
+                className="w-full h-12 bg-gold-500 hover:bg-gold-600 disabled:opacity-60 disabled:cursor-wait text-black font-black tracking-wider text-xs rounded-button transition-colors shadow-lg cursor-pointer flex items-center justify-center gap-2"
               >
                 <Send className="w-4 h-4" />
-                <span>{editingId ? "Save & Publish Changes" : "Publish Announcement Now"}</span>
+                <span>{isSaving ? 'Saving…' : editingId ? "Save & Publish Changes" : "Publish Announcement Now"}</span>
               </button>
             ) : (
               <button
                 id="form-schedule-later-btn"
                 type="submit"
-                className="w-full h-12 border border-gold-500 text-gold-500 hover:bg-gold-500/10 font-black tracking-wider text-xs rounded-button transition-colors cursor-pointer flex items-center justify-center gap-2"
+                disabled={isSaving}
+                className="w-full h-12 border border-gold-500 text-gold-500 hover:bg-gold-500/10 disabled:opacity-60 disabled:cursor-wait font-black tracking-wider text-xs rounded-button transition-colors cursor-pointer flex items-center justify-center gap-2"
               >
                 <Calendar className="w-4 h-4" />
-                <span>{editingId ? "Save Scheduled Settings" : "Schedule Announcement"}</span>
+                <span>{isSaving ? 'Saving…' : editingId ? "Save Scheduled Settings" : "Schedule Announcement"}</span>
               </button>
             )}
           </div>

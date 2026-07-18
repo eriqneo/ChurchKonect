@@ -156,3 +156,24 @@ npm run backend:bootstrap-training -- --email=YOUR_SUPERUSER_EMAIL
 The command uses disposable users and removes all test data. Add `--transport=curl` only when the
 local Node network path cannot reach PocketHost. The versioned schema is in
 `pb_migrations/202607171930_create_training_academy.js`.
+
+## Announcements and timeline
+
+The announcement feed renders from a cache scoped to the signed-in user, revalidates against
+PocketBase, and listens for realtime changes. A one-minute release check makes scheduled posts
+appear without reopening the app. Members receive only published records whose release time has
+arrived and whose expiry has not passed; the server rules also protect scheduled, expired, and
+archived content from direct API reads.
+
+Administrators, the Lead Pastor, and District Pastors can publish, schedule, edit, pin, duplicate,
+and archive announcements while online. Management actions wait for PocketBase confirmation, and
+hard deletion is disabled. Calendar export remains device-local.
+
+To reconcile the collection and run disposable publication-window and role tests:
+
+```bash
+npm run backend:bootstrap-announcements -- --transport=curl
+```
+
+The command prompts for both superuser credentials without echoing or storing them. The versioned
+schema is in `pb_migrations/202607182000_create_announcements.js`.
