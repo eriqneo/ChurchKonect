@@ -200,3 +200,24 @@ npm run backend:bootstrap-prayer -- --transport=curl
 
 The command removes all disposable records and clears its superuser token. The versioned schema is
 in `pb_migrations/202607182230_create_prayer_coordination.js`.
+
+## Reports and Analytics
+
+Leadership analytics are calculated by six read-only PocketBase view collections. The browser
+receives aggregate counts and cell/course standings instead of downloading prayer bodies or other
+sensitive source records. Administrators and Lead Pastors can inspect the dashboard; District
+Pastors have the same aggregate read access but no reporting write path. Members and anonymous
+clients receive no rows.
+
+The selected week, month, quarter, or year is refreshed from PocketBase on entry and on demand. A
+dated, account-scoped aggregate snapshot remains available during a short outage and is deleted on
+logout. Announcement engagement is not estimated: the dashboard shows publication status until a
+future backend records verifiable view and reminder events.
+
+To reconcile the views and run disposable read/write authorization tests:
+
+```bash
+npm run backend:bootstrap-reports -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607182300_create_reporting_views.js`.

@@ -151,6 +151,7 @@ async function main() {
       { name: 'isAnonymous', type: 'bool' },
       { name: 'category', type: 'select', required: true, maxSelect: 1, values: ['Healing', 'Guidance', 'Family', 'Deliverance', 'Thanksgiving', 'Financial', 'Spiritual Growth', 'Other'] },
       { name: 'content', type: 'text', required: true, max: 2000 },
+      { name: 'submittedAt', type: 'autodate', onCreate: true, onUpdate: false },
       { name: 'urgency', type: 'select', required: true, maxSelect: 1, values: ['low', 'medium', 'high'] },
       { name: 'status', type: 'select', required: true, maxSelect: 1, values: ['submitted', 'assigned', 'archived'] },
       { name: 'assignedIntercessors', type: 'relation', collectionId: users.id, maxSelect: 20, cascadeDelete: false },
@@ -158,6 +159,7 @@ async function main() {
     ],
     indexes: [
       'CREATE INDEX idx_prayer_requests_status_urgency ON prayer_requests (status, urgency)',
+      'CREATE INDEX idx_prayer_requests_submitted_at ON prayer_requests (submittedAt)',
       'CREATE INDEX idx_prayer_requests_submitter_status ON prayer_requests (submitter, status)',
       'CREATE INDEX idx_prayer_requests_category_status ON prayer_requests (category, status)'
     ]
@@ -280,7 +282,7 @@ async function main() {
       requestCategory: request.category, requestContent: request.content,
       requestDisplayName: request.displayName, requestDisplayAvatar: request.displayAvatar,
       requestIsAnonymous: request.isAnonymous, requestUrgency: request.urgency,
-      requestCreatedAt: request.created || new Date().toISOString()
+      requestCreatedAt: request.submittedAt || new Date().toISOString()
     });
     created.prayer_assignments.push(assignment.id);
     await clients.admin.collection('prayer_requests').update(request.id, { assignedIntercessors: [userRecords.intercessor.id], status: 'assigned' });

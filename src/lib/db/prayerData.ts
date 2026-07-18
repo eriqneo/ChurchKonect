@@ -91,7 +91,7 @@ function requireConnection(): void {
 
 async function fetchSnapshot(pb: PocketBase, ownerId: string): Promise<PrayerSnapshot> {
   const [requestPage, assignmentPage, notePage, watchPage, outcomePage] = await Promise.all([
-    pb.collection('prayer_requests').getList(1, 200, { sort: '-created' }),
+    pb.collection('prayer_requests').getList(1, 200, { sort: '-submittedAt' }),
     pb.collection('prayer_assignments').getList(1, 200, { sort: '-assignedAt' }),
     pb.collection('prayer_notes').getList(1, 200, { sort: '-created' }),
     pb.collection('prayer_watch_events').getList(1, 200, { sort: '-offeredAt' }),
@@ -137,7 +137,7 @@ async function fetchSnapshot(pb: PocketBase, ownerId: string): Promise<PrayerSna
       submitterAvatar: record.displayAvatar || '??',
       rhemaNotes: notesByRequest.get(record.id) || [],
       syncStatus: 'synced',
-      createdAt: record.created,
+      createdAt: record.submittedAt || record.created,
       updatedAt: record.updated
     };
   });
@@ -290,7 +290,7 @@ export function usePrayerData() {
             requestCategory: request.category, requestContent: request.content,
             requestDisplayName: request.displayName, requestDisplayAvatar: request.displayAvatar,
             requestIsAnonymous: request.isAnonymous, requestUrgency: request.urgency,
-            requestCreatedAt: request.created || new Date().toISOString()
+            requestCreatedAt: request.submittedAt || new Date().toISOString()
           });
           existingUserIds.add(intercessor.userId);
         }

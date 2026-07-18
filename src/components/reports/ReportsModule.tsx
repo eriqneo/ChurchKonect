@@ -1,17 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
-import { 
-  db, 
-  type MemberRecord, 
-  type CellGroupRecord, 
-  type PrayerRequestRecord, 
-  type TrainingCertificateRecord,
-  type CellReportRecord
-} from '../../lib/db/churchConnectDB';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useCurrentUser } from '../../lib/db/hooks';
+import { useAuth } from '../../lib/db/PocketBaseProvider';
+import { useReportData, type ReportDateRange } from '../../lib/db/reportData';
 import {
   GlassCard,
   AccentBadge,
@@ -24,26 +16,16 @@ import {
   ChevronRight, 
   Calendar, 
   Users, 
-  UserCheck, 
   Heart, 
   Award, 
-  Download, 
   Share2, 
   TrendingUp, 
-  TrendingDown, 
   ArrowUpDown, 
-  ChevronDown, 
   X, 
-  BookOpen, 
   Activity, 
   Printer, 
   Check, 
-  MessageSquare,
-  AlertTriangle,
-  ArrowRight,
   RefreshCw,
-  Eye,
-  Bell,
   Lock
 } from 'lucide-react';
 import { 
@@ -64,36 +46,13 @@ import {
   ComposedChart
 } from 'recharts';
 
-// ==========================================
-// PRESEEDED DATA FOR ANALYTICS FALLBACK
-// ==========================================
-const PRESEEDED_CELLS_ANALYTICS = [
-  { id: 'cell_1', name: 'Hope Fellowship', leader: 'Michael Sterns', membersCount: 15, avgAttendance: 85, reportsSubmitted: 100, trend: [80, 85, 82, 85] },
-  { id: 'cell_2', name: 'Grace Circle', leader: 'Sister Grace', membersCount: 12, avgAttendance: 78, reportsSubmitted: 90, trend: [70, 75, 76, 78] },
-  { id: 'cell_3', name: 'Faith Explorers', leader: 'Brother Caleb', membersCount: 16, avgAttendance: 92, reportsSubmitted: 100, trend: [85, 88, 90, 92] },
-  { id: 'cell_4', name: 'Shalom Sanctuary', leader: 'Sister Deborah', membersCount: 11, avgAttendance: 54, reportsSubmitted: 75, trend: [65, 60, 58, 54] },
-  { id: 'cell_5', name: 'Worship Warriors', leader: 'David Jenkins', membersCount: 14, avgAttendance: 81, reportsSubmitted: 100, trend: [78, 80, 80, 81] }
-];
-
-const PRESEEDED_COURSES = [
-  { id: 'c1', name: 'Discipleship 101', enrolled: 12, completionRate: 85 },
-  { id: 'c2', name: 'School of Leaders I', enrolled: 15, completionRate: 72 },
-  { id: 'c3', name: 'Alpha Foundations', enrolled: 24, completionRate: 90 },
-  { id: 'c4', name: 'Cell Shepherd Training', enrolled: 8, completionRate: 63 }
-];
-
-const PRESEEDED_ANNOUNCEMENTS = [
-  { id: 'a1', title: 'District Fellowship Outreach', views: 142, calendars: 48, notifications: 85 },
-  { id: 'a2', title: 'Training Academy Registration', views: 215, calendars: 64, notifications: 100 },
-  { id: 'a3', title: 'Youth Flame Camp 2026', views: 320, calendars: 112, notifications: 120 }
-];
-
 export function ReportsModule() {
   const { isDark } = useTheme();
-  const { role } = useCurrentUser();
+  const { user } = useAuth();
 
   // Date range state
-  const [dateRange, setDateRange] = useState<'This Week' | 'This Month' | 'This Quarter' | 'Custom'>('This Month');
+  const [dateRange, setDateRange] = useState<ReportDateRange>('This Month');
+  const { snapshot, isAuthorized, isRefreshing, isOfflineSnapshot, error, refresh } = useReportData(dateRange);
   
   // Table sorting states
   const [sortField, setSortField] = useState<string>('avgAttendance');
@@ -104,33 +63,10 @@ export function ReportsModule() {
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // --------------------------------------
-  // DYNAMIC DATABASE QUERYING (Dexie.js)
-  // --------------------------------------
-  const dbMembers = useLiveQuery(() => db.members.toArray()) || [];
-  const dbCellGroups = useLiveQuery(() => db.cellGroups.toArray()) || [];
-  const dbPrayers = useLiveQuery(() => db.prayerRequests.toArray()) || [];
-  const dbCertificates = useLiveQuery(() => db.trainingCertificates.toArray()) || [];
-
-  // Merge database counts into realistic preseeded metrics for perfect fidelity
-  const totalMembersCount = useMemo(() => {
-    return Math.max(85, dbMembers.length);
-  }, [dbMembers]);
-
-  const totalPrayersCount = useMemo(() => {
-    return Math.max(32, dbPrayers.length);
-  }, [dbPrayers]);
-
-  const totalCertificatesCount = useMemo(() => {
-    return Math.max(18, dbCertificates.length);
-  }, [dbCertificates]);
-
-  // Determine current audience eligibility
-  const isAuthorized = useMemo(() => {
-    if (!role) return false;
-    const roleId = role.id.toLowerCase();
-    return roleId === 'administrator' || roleId === 'admin' || roleId === 'lead_pastor' || roleId === 'district_pastor';
-  }, [role]);
+  const totalMembersCount = snapshot?.totalMembers ?? 0;
+  const totalPrayersCount = snapshot?.activePrayers ?? 0;
+  const totalCertificatesCount = snapshot?.verifiedCertificates ?? 0;
+  const averageAttendance = snapshot?.averageAttendance ?? 0;
 
   // Helper for clipboard copies & small vibrations
   const triggerToast = (msg: string) => {
@@ -190,88 +126,22 @@ export function ReportsModule() {
     boxShadow: isDark ? '0 8px 24px rgba(0,0,0,0.35)' : '0 8px 24px rgba(0,0,0,0.08)'
   };
 
-  // --------------------------------------
-  // TREND DATA GENERATORS
-  // --------------------------------------
-  const attendanceTrendData = useMemo(() => {
-    // Generate trend points representing multiple cell groups and overall average
-    const periods = dateRange === 'This Week' 
-      ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] 
-      : dateRange === 'This Quarter'
-        ? ['Month 1', 'Month 2', 'Month 3']
-        : ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
-
-    const seedFactors = {
-      'Hope Fellowship': [78, 84, 82, 85],
-      'Grace Circle': [70, 72, 79, 78],
-      'Faith Explorers': [88, 92, 89, 92],
-      'Shalom Sanctuary': [65, 58, 60, 54]
-    };
-
-    return periods.map((name, i) => {
-      const idx = i % 4;
-      const hope = seedFactors['Hope Fellowship'][idx] || 82;
-      const grace = seedFactors['Grace Circle'][idx] || 75;
-      const faith = seedFactors['Faith Explorers'][idx] || 90;
-      const shalom = seedFactors['Shalom Sanctuary'][idx] || 60;
-      
-      // Thick overall average line
-      const average = Math.round((hope + grace + faith + shalom) / 4);
-
-      return {
-        name,
-        'Hope Fellowship': hope,
-        'Grace Circle': grace,
-        'Faith Explorers': faith,
-        'Shalom Sanctuary': shalom,
-        'Overall Average': average
-      };
-    });
-  }, [dateRange]);
+  const attendanceTrendData = snapshot?.attendanceTrend ?? [];
 
   // --------------------------------------
   // PRAYER ANALYTICS DATA
   // --------------------------------------
-  const prayerCategoriesData = [
-    { name: 'Healing', value: 35, color: styles.primary },
-    { name: 'Family', value: 25, color: styles.secondary },
-    { name: 'Guidance', value: 20, color: '#D4C094' },
-    { name: 'Financial', value: 15, color: '#A7905E' },
-    { name: 'Other', value: 5, color: styles.text }
-  ];
-
-  const prayerTrendData = useMemo(() => {
-    return [
-      { week: 'W1', count: 8 },
-      { week: 'W2', count: 12 },
-      { week: 'W3', count: 15 },
-      { week: 'W4', count: totalPrayersCount - 35 > 0 ? totalPrayersCount - 35 : 18 }
-    ];
-  }, [totalPrayersCount]);
+  const categoryColors = [styles.primary, styles.secondary, '#D4C094', '#A7905E', '#8A7A5A', '#6E805F', '#9B775C', styles.text];
+  const prayerCategoriesData = (snapshot?.prayerCategories ?? []).map((item, index) => ({
+    name: item.name, value: item.percentage, count: item.count, color: categoryColors[index % categoryColors.length]
+  }));
+  const prayerTrendData = snapshot?.prayerTrend ?? [];
 
   // --------------------------------------
   // SORTABLE CELL GROUP LIST
   // --------------------------------------
   const cellPerformanceRows = useMemo(() => {
-    // Merge database cell group data if available
-    let cells = [...PRESEEDED_CELLS_ANALYTICS];
-    
-    if (dbCellGroups.length > 0) {
-      dbCellGroups.forEach((dbCell, index) => {
-        const alreadyListed = cells.find(c => c.name.toLowerCase() === dbCell.name.toLowerCase());
-        if (!alreadyListed) {
-          cells.push({
-            id: dbCell.localId,
-            name: dbCell.name,
-            leader: 'Leader Assigned',
-            membersCount: 8 + (index * 2) % 6,
-            avgAttendance: 75 + (index * 5) % 20,
-            reportsSubmitted: index % 3 === 0 ? 100 : 80,
-            trend: [70, 75, 74, 75 + (index * 5) % 20]
-          });
-        }
-      });
-    }
+    const cells = [...(snapshot?.cellPerformance ?? [])];
 
     return cells.sort((a: any, b: any) => {
       let valA = a[sortField];
@@ -287,7 +157,7 @@ export function ReportsModule() {
           : (valB as number) - (valA as number);
       }
     });
-  }, [sortField, sortDirection, dbCellGroups]);
+  }, [sortField, sortDirection, snapshot]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -300,6 +170,9 @@ export function ReportsModule() {
 
   // Determine cell group health status
   const getCellStatus = (avgAttendance: number, reportsSubmitted: number) => {
+    if (avgAttendance === 0 && reportsSubmitted === 0) {
+      return { label: 'No Data', variant: 'cathedral' as const };
+    }
     if (avgAttendance >= 80 && reportsSubmitted >= 95) {
       return { label: 'Healthy', variant: 'sage' as const };
     } else if (avgAttendance >= 60 || reportsSubmitted >= 80) {
@@ -314,10 +187,11 @@ export function ReportsModule() {
   // --------------------------------------
   const handleShareSummary = () => {
     const summary = `ChurchConnect Weekly Summary (${dateRange}):
-👥 ${totalMembersCount} total members (${dbMembers.length} records synced)
-📊 78% average attendance across cell groups
-🙏 ${totalPrayersCount} prayers active in the prayer bank
+👥 ${totalMembersCount} active members
+📊 ${averageAttendance}% average attendance across cell groups
+🙏 ${totalPrayersCount} active prayer requests
 📜 ${totalCertificatesCount} discipleship training certificates issued
+🕒 Refreshed ${snapshot ? new Date(snapshot.generatedAt).toLocaleString() : 'not yet'}
 🔗 Access your leadership panel: ${window.location.origin}`;
 
     if (navigator.clipboard) {
@@ -380,7 +254,7 @@ export function ReportsModule() {
             Oversight Restricted
           </h3>
           <p className={`${Typography.CAPTION} text-theme-text-secondary leading-relaxed`}>
-            This Ministry Analytics Dashboard is reserved for Lead Pastors, District Pastors, and Operational Administrators only.
+            This Ministry Analytics Dashboard is reserved for Lead Pastors, District Pastors, and Operational Administrators. PocketBase rules enforce this access on every report query.
           </p>
         </div>
 
@@ -410,16 +284,33 @@ export function ReportsModule() {
           HEADER SECTION & DATE PICKER
           ====================================================================== */}
       <div className="space-y-3.5">
-        <div>
+        <div className="flex items-start justify-between gap-3">
           <SectionTitle 
             title="Ministry Dashboard" 
-            badge={{ label: 'Admin Panel', variant: 'gold' }} 
+            badge={{ label: 'Leadership', variant: 'gold' }}
           />
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={isRefreshing}
+            className="mt-0.5 inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-theme-border/50 bg-theme-bg-secondary text-theme-text-secondary transition-colors hover:text-gold-500 disabled:opacity-50"
+            aria-label="Refresh analytics"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        <div className={`rounded-xl border px-3 py-2 text-[10px] leading-relaxed ${error ? 'border-cathedral-500/30 bg-cathedral-500/5 text-theme-text' : 'border-theme-border/40 bg-theme-bg-secondary/60 text-theme-text-secondary'}`}>
+          {error && !snapshot
+            ? `Analytics unavailable: ${error}`
+            : snapshot
+              ? `${isOfflineSnapshot ? 'Offline snapshot' : 'Server aggregates'} · Refreshed ${new Date(snapshot.generatedAt).toLocaleString()}`
+              : 'Loading authoritative ministry aggregates…'}
         </div>
 
         {/* Date Selector scrollable strip */}
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-1.5 -mx-4 px-4">
-          {(['This Week', 'This Month', 'This Quarter', 'Custom'] as const).map((range) => {
+          {(['This Week', 'This Month', 'This Quarter', 'This Year'] as const).map((range) => {
             const isActive = dateRange === range;
             return (
               <button
@@ -448,12 +339,12 @@ export function ReportsModule() {
           <div>
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-black/10 text-[#241B0B] inline-flex items-center gap-0.5 mb-2">
               <TrendingUp className="w-3 h-3" />
-              +3.2%
+              {snapshot ? dateRange : 'Loading'}
             </span>
             <p className={`${Typography.SUBTITLE} font-black text-[#241B0B]`}>Average Cell Attendance</p>
             <p className={`${Typography.CAPTION} text-[#3D2E12]/80 mt-0.5`}>Across all active fellowship groups</p>
           </div>
-          <ProgressRing percent={78} size={72} color="#0C0C0E" trackColor="rgba(0,0,0,0.15)" />
+          <ProgressRing percent={averageAttendance} size={72} color="#0C0C0E" trackColor="rgba(0,0,0,0.15)" />
         </div>
 
         {/* Metric: Total Saints */}
@@ -461,7 +352,6 @@ export function ReportsModule() {
           icon={<Users className="w-4.5 h-4.5" />}
           value={totalMembersCount}
           label="Total Saints"
-          trend={{ direction: 'up', value: '+5' }}
         />
 
         {/* Metric: Prayers Registered */}
@@ -469,7 +359,6 @@ export function ReportsModule() {
           icon={<Heart className="w-4.5 h-4.5" />}
           value={totalPrayersCount}
           label="Active Prayers"
-          trend={{ direction: 'up', value: '+12' }}
         />
 
         {/* Metric: Academy Certificates — spans full width */}
@@ -478,7 +367,6 @@ export function ReportsModule() {
             icon={<Award className="w-4.5 h-4.5" />}
             value={totalCertificatesCount}
             label="Certificates Issued"
-            trend={{ direction: 'up', value: '+3' }}
           />
         </div>
 
@@ -532,7 +420,7 @@ export function ReportsModule() {
                 <YAxis 
                   stroke={styles.text} 
                   fontSize={9}
-                  domain={[30, 100]}
+                  domain={[0, 100]}
                   tickLine={false}
                   axisLine={false}
                   tickFormatter={(val) => `${val}%`}
@@ -541,40 +429,6 @@ export function ReportsModule() {
                 <Tooltip
                   contentStyle={tooltipContentStyle}
                   formatter={(value: any, name: any) => [`${value}%`, name]}
-                />
-
-                {/* Individual background cell groups */}
-                <Line 
-                  type="monotone" 
-                  dataKey="Hope Fellowship" 
-                  stroke={styles.secondary} 
-                  strokeWidth={1}
-                  strokeOpacity={0.4}
-                  dot={false}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="Grace Circle" 
-                  stroke={styles.secondary} 
-                  strokeWidth={1}
-                  strokeOpacity={0.3}
-                  dot={false}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="Faith Explorers" 
-                  stroke={styles.secondary} 
-                  strokeWidth={1}
-                  strokeOpacity={0.5}
-                  dot={false}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="Shalom Sanctuary" 
-                  stroke={styles.negative} 
-                  strokeWidth={1}
-                  strokeOpacity={0.3}
-                  dot={false}
                 />
 
                 {/* Area Gradient beneath overall average line */}
@@ -604,10 +458,7 @@ export function ReportsModule() {
               <span className="w-2.5 h-0.5 bg-gold-500 rounded-full" />
               <span>Overall Avg ({attendanceTrendData.length} periods)</span>
             </div>
-            <div className="flex items-center gap-1 opacity-70">
-              <span className="w-2.5 h-0.5 bg-cathedral-400 rounded-full" />
-              <span>Cell groups trend (thin lines)</span>
-            </div>
+            <span className="opacity-70">Attendance records acknowledged by PocketBase</span>
           </div>
         </GlassCard>
       </div>
@@ -665,6 +516,13 @@ export function ReportsModule() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-theme-border/40 text-theme-text">
+                {cellPerformanceRows.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-[11px] text-theme-text-secondary">
+                      No active cell records are available for this period.
+                    </td>
+                  </tr>
+                )}
                 {cellPerformanceRows.map((cell) => {
                   const status = getCellStatus(cell.avgAttendance, cell.reportsSubmitted);
                   return (
@@ -723,13 +581,13 @@ export function ReportsModule() {
                 Total Requests Received
               </p>
               <h5 className="text-2xl font-black font-mono text-theme-text mt-1">
-                {totalPrayersCount}
+                {snapshot?.totalPrayers ?? 0}
               </h5>
             </div>
             <div className="border-t border-theme-border/20 pt-2 flex items-center justify-between text-[10px] text-theme-text-secondary">
               <span>Answered Prayers</span>
               <span className="font-mono font-bold text-gold-500">
-                {Math.round(totalPrayersCount * 0.42)} (42%)
+                {snapshot?.answeredPrayers ?? 0}{snapshot?.totalPrayers ? ` (${Math.round((snapshot.answeredPrayers / snapshot.totalPrayers) * 100)}%)` : ''}
               </span>
             </div>
           </GlassCard>
@@ -740,12 +598,12 @@ export function ReportsModule() {
                 Avg Response Window
               </p>
               <h5 className="text-2xl font-black font-mono text-theme-text mt-1">
-                4.2 Days
+                {snapshot?.averagePrayerResponseDays ?? 0} Days
               </h5>
             </div>
             <div className="border-t border-theme-border/20 pt-2 flex items-center justify-between text-[10px] text-theme-text-secondary">
               <span>Active Intercessors</span>
-              <span className="font-mono font-bold text-gold-500">14 Saints</span>
+              <span className="font-mono font-bold text-gold-500">{snapshot?.activeIntercessors ?? 0} Saints</span>
             </div>
           </GlassCard>
 
@@ -790,7 +648,7 @@ export function ReportsModule() {
                       <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                       <span>{item.name}</span>
                     </div>
-                    <span className="font-mono text-theme-text">{item.value}%</span>
+                      <span className="font-mono text-theme-text">{item.count} · {item.value}%</span>
                   </div>
                 ))}
               </div>
@@ -807,7 +665,7 @@ export function ReportsModule() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={prayerTrendData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                   <CartesianGrid stroke={styles.grid} vertical={false} strokeDasharray="3 3" />
-                  <XAxis dataKey="week" stroke={styles.text} fontSize={9} tickLine={false} axisLine={false} />
+                  <XAxis dataKey="name" stroke={styles.text} fontSize={9} tickLine={false} axisLine={false} />
                   <YAxis stroke={styles.text} fontSize={9} tickLine={false} axisLine={false} />
                   <Tooltip cursor={{ fill: 'rgba(212, 168, 74, 0.05)' }} contentStyle={tooltipContentStyle} />
                   <Bar dataKey="count" fill={styles.primary} radius={[4, 4, 0, 0]} barSize={28} />
@@ -830,7 +688,7 @@ export function ReportsModule() {
         <GlassCard className="p-4 space-y-4">
           <div className="flex items-center justify-between border-b border-theme-border/20 pb-2.5">
             <p className="text-xs font-black text-theme-text">
-              Active Courses Completion Rate
+              Published Courses Completion Rate
             </p>
             <div className="flex items-center gap-1 text-[10px] font-mono text-gold-500">
               <Award className="w-3.5 h-3.5" />
@@ -839,7 +697,7 @@ export function ReportsModule() {
           </div>
 
           <div className="space-y-3.5">
-            {PRESEEDED_COURSES.map((course) => (
+            {(snapshot?.courses ?? []).map((course) => (
               <div key={course.id} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex flex-col">
@@ -858,30 +716,33 @@ export function ReportsModule() {
                 </div>
               </div>
             ))}
+            {snapshot?.courses.length === 0 && (
+              <p className="py-5 text-center text-[11px] text-theme-text-secondary">No published Academy courses are available.</p>
+            )}
           </div>
         </GlassCard>
       </div>
 
       {/* ======================================================================
-          SECTION 6: ANNOUNCEMENT ENGAGEMENT
+          SECTION 6: ANNOUNCEMENT PUBLICATION STATUS
           ====================================================================== */}
       <div className="space-y-3">
         <h4 className={`${Typography.SUBTITLE} font-black text-theme-text`}>
-          Communication Outreach Reach
+          Communication Publication Status
         </h4>
 
         <GlassCard className="p-4 space-y-4">
           <div className="flex items-center justify-between border-b border-theme-border/20 pb-2">
             <p className="text-xs font-black text-theme-text">
-              Top Announcement Engagements
+              Announcement Categories
             </p>
             <span className="text-[9px] font-mono font-bold text-theme-text-secondary">
-              Views vs Reminders
+              {snapshot?.activeAnnouncements ?? 0} live now
             </span>
           </div>
 
           <div className="space-y-3.5">
-            {PRESEEDED_ANNOUNCEMENTS.map((announce) => (
+            {(snapshot?.announcements ?? []).map((announce) => (
               <div key={announce.id} className="flex items-center justify-between">
                 <div className="flex items-start gap-2.5 max-w-[65%]">
                   <div className="w-7 h-7 rounded-lg bg-theme-bg-secondary flex items-center justify-center text-gold-500 mt-0.5">
@@ -889,38 +750,27 @@ export function ReportsModule() {
                   </div>
                   <div className="flex flex-col">
                     <span className="text-xs font-black text-theme-text leading-tight truncate">
-                      {announce.title}
+                      {announce.tag}
                     </span>
                     <span className="text-[9px] text-theme-text-secondary">
-                      Sent to {announce.notifications} Saints
+                      {announce.total} total · {announce.archived} archived or expired
                     </span>
                   </div>
                 </div>
 
-                {/* Counters */}
-                <div className="flex items-center gap-3 font-mono font-bold text-[11px]">
-                  <div className="flex items-center gap-1 text-theme-text-secondary" title="Total Views">
-                    <Eye className="w-3.5 h-3.5 text-theme-text-muted" />
-                    <span>{announce.views}</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-gold-500" title="Added to Calendar">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{announce.calendars}</span>
-                  </div>
+                <div className="flex items-center gap-2 font-mono font-bold text-[10px]">
+                  <span className="rounded-full bg-sage-400/10 px-2 py-1 text-sage-400">{announce.active} live</span>
+                  <span className="rounded-full bg-gold-500/10 px-2 py-1 text-gold-500">{announce.scheduled} queued</span>
                 </div>
               </div>
             ))}
+            {snapshot?.announcements.length === 0 && (
+              <p className="py-5 text-center text-[11px] text-theme-text-secondary">No announcement publication records are available.</p>
+            )}
           </div>
 
-          {/* Engagement Funnel reaches bar */}
-          <div className="pt-2 border-t border-theme-border/10 space-y-2">
-            <div className="flex items-center justify-between text-[10px] text-theme-text-secondary font-bold">
-              <span>Overall App Notification Open Rate</span>
-              <span className="font-mono text-theme-text">84.2%</span>
-            </div>
-            <div className="h-1.5 w-full bg-theme-text/[0.04] dark:bg-white/[0.04] rounded-full overflow-hidden">
-              <div className="h-full bg-gold-500 rounded-full" style={{ width: '84.2%' }} />
-            </div>
+          <div className="pt-2 border-t border-theme-border/10 text-[10px] leading-relaxed text-theme-text-secondary">
+            Engagement rates are intentionally omitted until verifiable view and reminder events are recorded by the backend.
           </div>
 
         </GlassCard>
@@ -945,7 +795,8 @@ export function ReportsModule() {
             {/* Download/Print Button */}
             <button
               onClick={() => setShowPrintModal(true)}
-              className="px-3.5 py-2.5 bg-theme-text text-theme-bg dark:bg-white dark:text-black rounded-xl text-xs font-black hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-md"
+              disabled={!snapshot}
+              className="px-3.5 py-2.5 bg-theme-text text-theme-bg dark:bg-white dark:text-black rounded-xl text-xs font-black hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-md disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Printer className="w-3.5 h-3.5 stroke-[2.5]" />
               <span>Print Report</span>
@@ -954,7 +805,8 @@ export function ReportsModule() {
             {/* WhatsApp Share Button */}
             <button
               onClick={handleShareSummary}
-              className="px-3.5 py-2.5 bg-gold-500 text-black rounded-xl text-xs font-black hover:bg-gold-600 active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-glow-gold border border-gold-500"
+              disabled={!snapshot}
+              className="px-3.5 py-2.5 bg-gold-500 text-black rounded-xl text-xs font-black hover:bg-gold-600 active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow-glow-gold border border-gold-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Share2 className="w-3.5 h-3.5 stroke-[2.5]" />
               <span>Share Summary</span>
@@ -1025,7 +877,7 @@ export function ReportsModule() {
             {/* Mini Trend Line */}
             <div className="space-y-2">
               <p className="text-xs font-black text-theme-text">
-                Oversight Historical Trend (Last 4 Fellowships)
+                Attendance Trend for {dateRange}
               </p>
               <div className="w-full h-[110px] bg-theme-text/[0.01] rounded-2xl p-2.5 border border-theme-border/30">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1035,7 +887,7 @@ export function ReportsModule() {
                   >
                     <CartesianGrid stroke={styles.grid} strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="name" stroke={styles.text} fontSize={9} />
-                    <YAxis stroke={styles.text} fontSize={9} domain={[30, 100]} />
+                    <YAxis stroke={styles.text} fontSize={9} domain={[0, 100]} />
                     <Tooltip contentStyle={tooltipContentStyle} />
                     <Area type="monotone" dataKey="attendance" stroke={styles.primary} strokeWidth={2} fill="url(#averageGradient)" />
                   </AreaChart>
@@ -1053,13 +905,13 @@ export function ReportsModule() {
                   <span className="w-4.5 h-4.5 rounded-full bg-sage-400/20 text-sage-400 flex items-center justify-center text-[10px] font-bold">
                     ✓
                   </span>
-                  <span>Leader registered & credentials verified</span>
+                  <span>{selectedCell.leader === 'Not assigned' ? 'Cell leader assignment is missing' : 'Cell leader is assigned'}</span>
                 </div>
                 <div className="flex items-center gap-2.5 text-xs text-theme-text">
                   <span className="w-4.5 h-4.5 rounded-full bg-sage-400/20 text-sage-400 flex items-center justify-center text-[10px] font-bold">
                     ✓
                   </span>
-                  <span>All weekly offerings logged & approved</span>
+                  <span>{selectedCell.avgAttendance > 0 ? 'Attendance records are available for this period' : 'No attendance captured for this period'}</span>
                 </div>
                 <div className="flex items-center gap-2.5 text-xs text-theme-text">
                   <span className={`w-4.5 h-4.5 rounded-full flex items-center justify-center text-[10px] font-bold ${
@@ -1069,25 +921,9 @@ export function ReportsModule() {
                   }`}>
                     {selectedCell.reportsSubmitted === 100 ? '✓' : '!'}
                   </span>
-                  <span>Clergy reports submission up-to-date</span>
+                  <span>{selectedCell.reportsSubmitted}% of recorded meetings have submitted reports</span>
                 </div>
               </div>
-            </div>
-
-            {/* Contact Leader Mock Button */}
-            <div className="pt-2">
-              <button
-                onClick={() => {
-                  if (navigator.clipboard) {
-                    navigator.clipboard.writeText(`${selectedCell.leader.toLowerCase().replace(/\s+/g, '.')}@churchconnect.com`);
-                  }
-                  triggerToast(`Contact address copied for ${selectedCell.leader}!`);
-                }}
-                className="w-full py-2.5 rounded-xl bg-gold-500 text-black text-xs font-black hover:bg-gold-600 active:scale-95 transition-all flex items-center justify-center gap-1.5"
-              >
-                <MessageSquare className="w-3.5 h-3.5 stroke-[2.5]" />
-                <span>Contact Cell Leader</span>
-              </button>
             </div>
 
           </div>
@@ -1151,7 +987,7 @@ export function ReportsModule() {
                     </p>
                   </div>
                   <div className="text-right text-[10px] font-mono text-gray-500 space-y-0.5">
-                    <p>Generated: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
+                    <p>Snapshot: {snapshot ? new Date(snapshot.generatedAt).toLocaleString() : 'Unavailable'}</p>
                     <p>Oversight: Administrator & Lead Pastor Panel</p>
                     <p>Range: {dateRange} Analytics</p>
                   </div>
@@ -1173,7 +1009,7 @@ export function ReportsModule() {
                       Avg Attendance
                     </span>
                     <span className="text-xl font-black font-mono text-gray-900 block mt-1">
-                      78%
+                      {averageAttendance}%
                     </span>
                   </div>
 
@@ -1249,7 +1085,7 @@ export function ReportsModule() {
                       Discipleship Training Metrics
                     </h4>
                     <div className="space-y-1.5 text-[10px]">
-                      {PRESEEDED_COURSES.map((course) => (
+                      {(snapshot?.courses ?? []).map((course) => (
                         <div key={course.id} className="flex justify-between border-b border-gray-100 pb-1">
                           <span className="text-gray-600">{course.name}:</span>
                           <span className="font-bold text-gray-900">{course.completionRate}% completions</span>
@@ -1262,10 +1098,10 @@ export function ReportsModule() {
                 {/* Sign-off signatures */}
                 <div className="pt-8 flex justify-between text-[9px] text-gray-500 font-mono select-none">
                   <div className="w-48 text-center border-t border-gray-400 pt-1.5">
-                    Prepared By: Sarah Jenkins (Operations)
+                    Prepared By: {user?.name || 'Authorized user'}
                   </div>
                   <div className="w-48 text-center border-t border-gray-400 pt-1.5">
-                    Authorized Clergy: Lead Pastor David
+                    Source: PocketBase reporting views
                   </div>
                 </div>
 

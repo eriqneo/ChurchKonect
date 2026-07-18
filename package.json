@@ -14,6 +14,7 @@
     "backend:bootstrap-training": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-training.mjs",
     "backend:bootstrap-announcements": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-announcements.mjs",
     "backend:bootstrap-prayer": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-prayer.mjs",
+    "backend:bootstrap-reports": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-reports.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name churchkonect",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
