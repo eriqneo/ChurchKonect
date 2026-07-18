@@ -17,6 +17,7 @@
     "backend:bootstrap-reports": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-reports.mjs",
     "backend:bootstrap-notifications": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-notifications.mjs",
     "backend:bootstrap-governance": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-governance.mjs",
+    "backend:bootstrap-saints-directory": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-saints-directory.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name churchkonect",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
@@ -32,6 +33,7 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pocketbase": "^0.27.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.9.1",

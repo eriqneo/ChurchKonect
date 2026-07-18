@@ -27,6 +27,9 @@ The system is compartmentalized into self-contained modules, each tailored to sp
 ### 👥 1. Membership & Directory ("Saints Directory")
 *   **Purpose**: Centralized record keeping for all church members ("Saints").
 *   **Key Features**:
+    *   **Privacy-Safe Projection**: The church-wide directory contains ministry placement but omits phone, email, address, birth date, QR identity, and inactive registry records.
+    *   **Scoped Registry Access**: Full records are limited to authorized leadership, the linked member, and ministry leaders for their assigned roster.
+    *   **Paginated Offline Cache**: Confirmed directory pages and server-derived structure counts remain available per signed-in account during short outages.
     *   Multi-parameter search and fuzzy query filters (filter by Church Role, Pillar, Section, or District).
     *   Detailed Profile Cards detailing leadership records, cell group affiliations, and academy course histories.
     *   Visual fallback avatars generated dynamically using pastel gradient pairings and name initials.

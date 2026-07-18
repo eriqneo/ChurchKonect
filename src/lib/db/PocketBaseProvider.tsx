@@ -137,7 +137,7 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
         db.cellMeetings, db.cellAttendance, db.cellVisitors, db.cellReports,
         db.trainings, db.trainingSessions, db.trainingEnrollments,
         db.trainingAttendance, db.trainingCertificates, db.announcements,
-        db.notifications, db.auditLogs, db.feedback
+        db.notifications, db.auditLogs, db.feedback, db.directoryMembers, db.directoryCounts
       ], async () => {
         await Promise.all([
           db.members.filter((record) => Boolean(record.remoteId)).delete(),
@@ -156,7 +156,9 @@ export function PocketBaseProvider({ children }: { children: React.ReactNode }) 
           db.announcements.filter((record) => record.syncStatus === 'synced').delete(),
           db.notifications.filter((record) => Boolean(record.cacheOwnerId)).delete(),
           db.auditLogs.filter((record) => Boolean(record.cacheOwnerId)).delete(),
-          db.feedback.filter((record) => Boolean(record.cacheOwnerId)).delete()
+          db.feedback.filter((record) => Boolean(record.cacheOwnerId)).delete(),
+          db.directoryMembers.filter((record) => Boolean(record.cacheOwnerId)).delete(),
+          db.directoryCounts.filter((record) => Boolean(record.cacheOwnerId)).delete()
         ]);
       });
       if ('clearAppBadge' in navigator) {

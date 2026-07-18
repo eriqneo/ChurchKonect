@@ -280,6 +280,31 @@ export interface FeedbackRecord extends LocalFirstRecord {
   cacheOwnerId?: string;
 }
 
+export interface DirectoryMemberRecord {
+  id?: number;
+  localId: string;
+  userId?: string;
+  fullName: string;
+  role: string;
+  avatarText: string;
+  cellGroupId?: string;
+  cellGroupName?: string;
+  sectionId?: string;
+  sectionName?: string;
+  departments: string[];
+  cacheOwnerId: string;
+}
+
+export interface DirectoryCountRecord {
+  id?: number;
+  localId: string;
+  kind: 'cell' | 'department';
+  targetId: string;
+  memberCount: number;
+  cacheOwnerId: string;
+  updatedAt: string;
+}
+
 export interface AppSettingsRecord {
   id?: number;
   key: string;
@@ -314,6 +339,8 @@ export class ChurchConnectDB extends Dexie {
   notifications!: Table<NotificationRecord, number>;
   auditLogs!: Table<AuditLogRecord, number>;
   feedback!: Table<FeedbackRecord, number>;
+  directoryMembers!: Table<DirectoryMemberRecord, number>;
+  directoryCounts!: Table<DirectoryCountRecord, number>;
   appSettings!: Table<AppSettingsRecord, number>;
 
   constructor() {
@@ -368,6 +395,11 @@ export class ChurchConnectDB extends Dexie {
     this.version(6).stores({
       auditLogs: '++id, &localId, remoteId, userId, action, createdAt, cacheOwnerId',
       feedback: '++id, &localId, remoteId, memberId, type, status, syncStatus, cacheOwnerId, createdAt'
+    });
+
+    this.version(7).stores({
+      directoryMembers: '++id, &[cacheOwnerId+localId], localId, userId, fullName, role, cellGroupId, sectionId, cacheOwnerId',
+      directoryCounts: '++id, &[cacheOwnerId+localId], localId, kind, targetId, cacheOwnerId, updatedAt'
     });
   }
 }

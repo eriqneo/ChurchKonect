@@ -117,6 +117,28 @@ npm run backend:bootstrap-cell-structure -- --email=YOUR_SUPERUSER_EMAIL
 
 Both commands prompt for the password without echoing or storing it.
 
+### Saints Directory privacy projection
+
+The member-facing Saints Directory reads from `saints_directory`, not from full registry records.
+Authenticated users can see names, roles, fellowship/section placement, ministries, and server-
+derived fellowship/ministry counts. Email, phone, address, date of birth, QR identifiers, inactive
+records, and other registry fields are not present in the projection.
+
+Directory pages are cached per account in batches of 100 and can be loaded progressively. Full
+`members` access is restricted to Administrators/Lead Pastors, a member's own linked profile, a
+Cell Leader's assigned fellowship roster, or a District Pastor's assigned section. Members may
+update their linked name and phone, but cannot change email, role, ministry placement, QR identity,
+status, or ownership. Login email changes require a separate verified account workflow.
+
+To reconcile the privacy views and run disposable leakage, ownership, roster-scope, aggregate,
+inactive-record, and anonymous-access tests:
+
+```bash
+npm run backend:bootstrap-saints-directory -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607190230_create_saints_directory.js`.
+
 ## Cell meetings, attendance, visitors, and reports
 
 Fellowship operations are local-first: leaders can start a meeting, take attendance, add visitors,

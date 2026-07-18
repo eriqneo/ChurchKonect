@@ -41,21 +41,21 @@ editing across many devices.
 
 ---
 
-## 3. Current state (audited 2026-07-16)
+## 3. Current implementation state
 
 | Layer | Current implementation | Assessment |
 |---|---|---|
-| Local database | Dexie/IndexedDB with 20 tables and reactive `useLiveQuery` hooks | Real and valuable |
-| UI updates | Local writes render immediately | Fast, but currently treated as canonical |
-| Synchronization | `SyncEngine.ts` scans pending rows and simulates upload with a timer | Not connected to a server |
-| Authentication | `PocketBaseProvider.tsx` uses hardcoded personas and local settings | Simulated |
-| Identity | `activeSession` and `currentRole` are separate sources | Critical correctness defect |
-| Saints Directory | Polished screen backed by component mock arrays | Disconnected from the real registry |
-| PocketBase hooks | A server hook exists in `pb_hooks/`, but no backend is configured | Dormant |
-| Backend configuration | No production PocketBase URL or deployed schema | Missing |
+| Local database | Dexie/IndexedDB with scoped caches and dedicated outbox tables | Real, account-scoped support layer |
+| UI updates | Data facades combine confirmed server data with approved optimistic commands | Fast without treating every local row as canonical |
+| Synchronization | Cell operations and Academy attendance use durable idempotent outboxes | Connected; legacy adapter remains only for unmigrated paths |
+| Authentication | `PocketBaseProvider.tsx` uses PocketBase auth and refresh tokens | Server-authoritative |
+| Identity | PocketBase auth is the production identity and role source | Reconciled |
+| Saints Directory | Paginated privacy-safe view with scoped cache and server aggregate counts | Connected without exposing registry PII |
+| PocketBase hooks | Production collections, views, rules, and live bootstrap tests are versioned | Active |
+| Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
-The existing UI and Dexie-backed workflows are useful foundations. The fake authentication,
-fake sync completion, and disconnected Saints data must not be carried into production.
+The implementation now follows the selective local-first target below. Remaining legacy helpers
+must continue to be retired only after their consumers move to tested data facades.
 
 ---
 

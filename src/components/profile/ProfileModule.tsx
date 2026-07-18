@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { QRCodeSVG } from 'qrcode.react';
 import { db } from '../../lib/db/churchConnectDB';
 import { useCurrentUser } from '../../lib/db/hooks';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useGovernanceData, type FeedbackStatus, type FeedbackType } from '../../lib/db/governanceData';
+import { usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
 import { 
@@ -32,7 +34,6 @@ import {
   ChevronRight, 
   Check, 
   Sparkles,
-  Camera,
   CheckCircle,
   FileText,
   Smartphone,
@@ -65,11 +66,12 @@ interface ProfileModuleProps {
 export function ProfileModule({ currentRole: passedRole, setActiveTab }: ProfileModuleProps) {
   const { theme, toggleTheme, isDark } = useTheme();
   const toast = useToast();
-  const { logout } = useAuth();
+  const { logout, pb, user: authUser } = useAuth();
   const governance = useGovernanceData();
+  const { members: registryMembers, updateMember } = usePocketBaseMembers();
   
   // Get active system user & role
-  const { user: currentUser, role: userRole } = useCurrentUser();
+  const { role: userRole } = useCurrentUser();
   const currentRole = passedRole || userRole;
 
   // Manage view segments for Admin/Pastor: 'profile' | 'cms'
@@ -84,7 +86,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
     section: 'District North',
     departments: [],
     memberSince: 'January 2024',
-    idNumber: 'CC-2026-0000',
+    idNumber: 'Not linked',
     avatarText: ''
   });
 
@@ -108,97 +110,47 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const [tempEmail, setTempEmail] = useState('');
   const [tempPhone, setTempPhone] = useState('');
 
-  const currentUserId = currentUser?.localId;
-  const currentUserName = currentUser?.name;
-  const currentUserEmail = currentUser?.email;
+  const currentUserId = authUser?.id;
+  const memberRecord = registryMembers.find((member) => member.userId === currentUserId);
 
-  // 1. Live synchronization of current user with db.members
-  const memberRecord = useLiveQuery(async () => {
-    if (!currentUserId) return null;
-    return await db.members.where('localId').equals(currentUserId).first();
-  }, [currentUserId]);
-
-  // Sync state with local state
+  // Keep profile identity aligned with the linked, server-confirmed registry record.
   useEffect(() => {
     if (memberRecord) {
       setProfile({
         name: memberRecord.fullName,
         email: memberRecord.email,
         phone: memberRecord.phone,
-        cellGroup: (memberRecord as any).cellGroupId ? 'Loading...' : 'Not assigned',
-        section: 'District North',
-        departments: (memberRecord as any).departments || [],
+        cellGroup: memberRecord.cellGroupName || 'Not assigned',
+        section: memberRecord.sectionName || 'Not assigned',
+        departments: memberRecord.departments || [],
         memberSince: new Date(memberRecord.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
         idNumber: memberRecord.qrCode,
         avatarText: memberRecord.avatarText || 'M'
       });
+    } else if (authUser) {
+      setProfile((current) => ({
+        ...current,
+        name: authUser.name,
+        email: authUser.email,
+        phone: '',
+        cellGroup: 'Not linked',
+        section: 'Not linked',
+        departments: authUser.department ? [authUser.department] : [],
+        memberSince: 'Not linked',
+        idNumber: 'Not linked',
+        avatarText: authUser.avatarText
+      }));
     }
-  }, [memberRecord]);
-
-  // Load cell group name dynamically
-  useEffect(() => {
-    const resolveCellName = async () => {
-      if (memberRecord && (memberRecord as any).cellGroupId) {
-        const cell = await db.cellGroups.where('localId').equals((memberRecord as any).cellGroupId).first();
-        if (cell) {
-          setProfile(prev => ({ ...prev, cellGroup: cell.name }));
-        } else {
-          setProfile(prev => ({ ...prev, cellGroup: 'Not assigned' }));
-        }
-      }
-    };
-    resolveCellName();
-  }, [memberRecord]);
-
-  // Automatically insert the current system user into db.members on mount if missing
-  useEffect(() => {
-    const checkAndInsertUser = async () => {
-      if (!currentUserId || !currentUserName || !currentUserEmail) return;
-      const existing = await db.members.where('localId').equals(currentUserId).first();
-      if (!existing) {
-        const randomId = Math.floor(1000 + Math.random() * 9000);
-        const qrCode = `CC-2026-${randomId}`;
-        const initials = currentUserName
-          .split(' ')
-          .map(n => n[0])
-          .join('')
-          .substring(0, 2)
-          .toUpperCase();
-
-        const mappedRole = 
-          currentUserId === 'user-pastor-david' ? 'lead_pastor' :
-          currentUserId === 'user-admin-sarah' ? 'admin' :
-          currentUserId === 'user-cell-leader-michael' ? 'worker' : 'member';
-
-        await db.members.add({
-          localId: currentUserId,
-          fullName: currentUserName,
-          email: currentUserEmail,
-          phone: currentUserId === 'user-pastor-david' ? '+1 (555) 019-2834' : '+1 (555) 012-9988',
-          role: mappedRole,
-          qrCode,
-          avatarText: initials,
-          syncStatus: 'synced',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          departments: currentUserId === 'user-pastor-david' ? ['Executive Clergy'] : currentUserId === 'user-admin-sarah' ? ['Operations & Finance'] : ['Hope Cell Group'],
-          address: '12 Cathedral Gate, District North',
-          dateOfBirth: '1985-06-15',
-          status: 'Active'
-        } as any);
-      }
-    };
-    checkAndInsertUser();
-  }, [currentUserId, currentUserName, currentUserEmail]);
+  }, [authUser, memberRecord]);
 
   // 2. Query enrolled courses & progress dynamically
   const enrolledCourses = useLiveQuery(async () => {
-    if (!currentUserId) return [];
+    if (!memberRecord?.localId) return [];
     
     // Find all course enrollments for this member
     const userEnrollments = await db.trainingEnrollments
       .where('memberId')
-      .equals(currentUserId)
+      .equals(memberRecord.localId)
       .toArray();
 
     if (userEnrollments.length === 0) return [];
@@ -208,15 +160,26 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
       .filter(t => trainingIds.includes(t.localId))
       .toArray();
 
-    // Map courses with simulated progress (or dynamic stats if attendance exists)
+    // Derive progress from confirmed completed sessions and attendance.
+    const sessions = await db.trainingSessions.toArray();
+    const attendance = await db.trainingAttendance.where('memberId').equals(memberRecord.localId).toArray();
     return courses.map(course => {
-      // Find sessions for this course
+      const enrollment = userEnrollments.find((item) => item.trainingId === course.localId);
+      const occurredSessionIds = sessions
+        .filter((session) => session.trainingId === course.localId && session.status === 'completed')
+        .map((session) => session.localId);
+      const attendedCount = new Set(attendance
+        .filter((item) => occurredSessionIds.includes(item.sessionId))
+        .map((item) => item.sessionId)).size;
+      const progress = enrollment?.status === 'completed'
+        ? 100
+        : occurredSessionIds.length ? Math.round((attendedCount / occurredSessionIds.length) * 100) : 0;
       return {
         ...course,
-        progress: course.status === 'completed' ? 100 : 75, // Default simulated high-fidelity progress
+        progress
       };
     });
-  }, [currentUserId]) || [];
+  }, [memberRecord?.localId]) || [];
 
   // Open edit sheet
   const handleOpenEdit = () => {
@@ -226,40 +189,32 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
     setShowEditSheet(true);
   };
 
-  // Save profile updates to IndexedDB (Dexie)
+  // Save the permitted self-service fields to PocketBase.
   const handleSaveProfile = async () => {
-    if (!currentUser?.localId) return;
-    if (!tempName.trim() || !tempPhone.trim() || !tempEmail.trim()) {
-      toast.error('All profile fields are required.');
+    if (!authUser || !memberRecord) {
+      toast.error('Ask an administrator to link your login to a member registry profile first.');
+      return;
+    }
+    if (!tempName.trim() || !tempPhone.trim()) {
+      toast.error('Name and phone number are required.');
       return;
     }
 
-    const existing = await db.members.where('localId').equals(currentUser.localId).first();
-    if (existing && existing.id) {
-      const avatarText = tempName
-        .split(' ')
-        .map(n => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase();
-
-      await db.members.update(existing.id, {
-        fullName: tempName,
-        phone: tempPhone,
-        email: tempEmail,
-        avatarText,
-        updatedAt: new Date().toISOString(),
-        syncStatus: 'pending'
+    const avatarText = tempName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+    try {
+      await updateMember(memberRecord.remoteId, {
+        fullName: tempName.trim(),
+        phone: tempPhone.trim()
       });
-
-      // Also update system user table if necessary
-      const userRec = await db.users.where('email').equals(existing.email).first();
-      if (userRec && userRec.id) {
-        await db.users.update(userRec.id, { name: tempName, email: tempEmail });
-      }
-
+      const updatedUser = await pb.collection('users').update(authUser.id, {
+        name: tempName.trim(),
+        avatarText
+      });
+      pb.authStore.save(pb.authStore.token, updatedUser);
       toast.success('Your profile details have been saved.');
       setShowEditSheet(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Your profile could not be updated.');
     }
   };
 
@@ -355,23 +310,19 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
           <div className="relative rounded-card-lg overflow-hidden border border-white/5 p-6 flex flex-col items-center justify-center text-center shadow-glow-cathedral bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cathedral-950 via-surface-0 to-surface-0 dark:from-cathedral-950 dark:via-surface-0 dark:to-surface-0 light:from-gold-100/30 light:via-white light:to-white">
             
             {/* Top Right Action: Edit badge */}
-            <div className="absolute top-4 right-4">
-              <button onClick={handleOpenEdit} className="cursor-pointer">
-                <AccentBadge label="Edit" variant="outline" size="md" />
-              </button>
-            </div>
+            {memberRecord && (
+              <div className="absolute top-4 right-4">
+                <button onClick={handleOpenEdit} className="cursor-pointer">
+                  <AccentBadge label="Edit" variant="outline" size="md" />
+                </button>
+              </div>
+            )}
 
             {/* Avatar Circle with Dynamic Borders */}
             <div className="relative mt-2">
               <div className={`w-24 h-24 rounded-full overflow-hidden flex items-center justify-center bg-gradient-to-tr from-cathedral-800 via-cathedral-900 to-gold-500 shadow-lg text-white font-extrabold text-2xl tracking-wider select-none ${getAvatarRingClass()}`}>
                 {profile.avatarText}
               </div>
-              <button 
-                onClick={() => toast.success('Upload simulated: select a new image')}
-                className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-gold-500 text-black border-2 border-surface-100 flex items-center justify-center hover:scale-110 active:scale-90 transition-transform cursor-pointer shadow-md"
-              >
-                <Camera className="w-3.5 h-3.5 stroke-[2.5]" />
-              </button>
             </div>
 
             {/* User Info Details */}
@@ -409,7 +360,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
           {/* ======================================================================
               SECTION 2: My QR Code Fellowship Pass
               ====================================================================== */}
-          <GlassCard variant="elevated" className="relative p-6 text-center space-y-4 overflow-hidden border border-gold-500/10">
+          {memberRecord ? <GlassCard variant="elevated" className="relative p-6 text-center space-y-4 overflow-hidden border border-gold-500/10">
             
             {/* Subtle Decorative Frame */}
             <div className="absolute inset-2 border border-gold-500/15 rounded-[18px] pointer-events-none" />
@@ -425,8 +376,8 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
               onClick={() => setShowQRFullscreen(true)}
               className="w-[180px] h-[180px] bg-white rounded-2xl mx-auto flex items-center justify-center p-3 shadow-md cursor-pointer hover:scale-[1.03] transition-transform relative group"
             >
-              {/* Real simulated QR SVG */}
-              <svg className="w-full h-full text-black" viewBox="0 0 29 29" fill="currentColor">
+              <QRCodeSVG value={profile.idNumber} size={156} level="M" bgColor="#ffffff" fgColor="#000000" />
+              <svg className="hidden" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true">
                 <path d="M0 0h7v7H0zm1 1v5h5V1zm1 1h3v3H2zm20-2h7v7h-7zm1 1v5h5V1zm1 1h3v3h-3zM0 22h7v7H0zm1 1v5h5v-5zm1 1h3v3H2z" />
                 <path d="M9 0h1v1H9zm2 0h2v1h-2zm3 0h1v2h-1zm2 0h1v1h-1zm1 0h1v2h-1zm1 0h1v1h-1zm-6 2h1v1H9zm2 0h1v1h-1zm4 0h1v1h-1zm1 0h1v1h-1zm-6 2h1v1h-1zm3 0h1v1h-1zm2 0h2v1h-2zm-5 2h2v1H9zm3 0h1v1h-1zm2 0h1v2h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-7 2h1v1H9zm2 0h2v1h-2zm4 0h1v1h-1zm1 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-10 2h1v1H8zm3 0h1v1h-1zm3 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-8 2h2v1H9zm3 0h1v1h-1zm3 0h1v1h-1zm1 0h2v1h-2zm1 0h1v1h-1zm-8 2h1v1H9zm2 0h1v1h-1zm2 0h2v1h-2zm3 0h1v1h-1zm-6 2h2v1H9zm3 0h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1z" />
                 <path d="M14 14h1v1h-1zm1 1h1v1h-1zm-2 1h1v1h-1zm3 0h1v1h-1zm-2 1h1v1h-1zm3 0h1v1h-1zm-4 2h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1zm-3 1h1v1h-1zm2 0h1v1h-1zm-4 2h1v1h-1zm2 0h2v1h-2zm3 0h1v1h-1zm1 0h1v1h-1zm-6 2h1v1H9zm3 0h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1z" />
@@ -450,7 +401,13 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
               </p>
             </div>
 
-          </GlassCard>
+          </GlassCard> : (
+            <GlassCard className="p-5 text-center space-y-2">
+              <QrCode className="w-8 h-8 mx-auto text-text-muted opacity-50" />
+              <h4 className="text-sm font-bold text-text-primary">Fellowship pass unavailable</h4>
+              <p className="text-xs text-text-muted">Ask an administrator to link this login to your member registry profile.</p>
+            </GlassCard>
+          )}
 
           {/* ======================================================================
               SECTION 3: Ministry Info (Form-style List)
@@ -752,7 +709,8 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
 
               {/* Big 280px QR code */}
               <div className="w-[260px] h-[260px] bg-white border border-black/5 p-4 rounded-2xl flex items-center justify-center shadow-inner">
-                <svg className="w-full h-full text-black" viewBox="0 0 29 29" fill="currentColor">
+                <QRCodeSVG value={profile.idNumber} size={228} level="M" bgColor="#ffffff" fgColor="#000000" />
+                <svg className="hidden" viewBox="0 0 29 29" fill="currentColor" aria-hidden="true">
                   <path d="M0 0h7v7H0zm1 1v5h5V1zm1 1h3v3H2zm20-2h7v7h-7zm1 1v5h5V1zm1 1h3v3h-3zM0 22h7v7H0zm1 1v5h5v-5zm1 1h3v3H2z" />
                   <path d="M9 0h1v1H9zm2 0h2v1h-2zm3 0h1v2h-1zm2 0h1v1h-1zm1 0h1v2h-1zm1 0h1v1h-1zm-6 2h1v1H9zm2 0h1v1h-1zm4 0h1v1h-1zm1 0h1v1h-1zm-6 2h1v1h-1zm3 0h1v1h-1zm2 0h2v1h-2zm-5 2h2v1H9zm3 0h1v1h-1zm2 0h1v2h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-7 2h1v1H9zm2 0h2v1h-2zm4 0h1v1h-1zm1 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-10 2h1v1H8zm3 0h1v1h-1zm3 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1zm-8 2h2v1H9zm3 0h1v1h-1zm3 0h1v1h-1zm1 0h2v1h-2zm1 0h1v1h-1zm-8 2h1v1H9zm2 0h1v1h-1zm2 0h2v1h-2zm3 0h1v1h-1zm-6 2h2v1H9zm3 0h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1z" />
                   <path d="M14 14h1v1h-1zm1 1h1v1h-1zm-2 1h1v1h-1zm3 0h1v1h-1zm-2 1h1v1h-1zm3 0h1v1h-1zm-4 2h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1zm-3 1h1v1h-1zm2 0h1v1h-1zm-4 2h1v1h-1zm2 0h2v1h-2zm3 0h1v1h-1zm1 0h1v1h-1zm-6 2h1v1H9zm3 0h1v1h-1zm2 0h1v1h-1zm2 0h1v1h-1zm1 0h1v1h-1z" />
@@ -811,9 +769,11 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
             <input
               type="email"
               value={tempEmail}
-              onChange={(e) => setTempEmail(e.target.value)}
-              className="w-full p-3 rounded-card bg-surface-200 text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none"
+              readOnly
+              aria-readonly="true"
+              className="w-full p-3 rounded-card bg-surface-200/70 text-sm border border-theme-border text-text-muted outline-none cursor-not-allowed"
             />
+            <p className="text-[10px] text-text-muted">Login email changes require a separately verified account process.</p>
           </div>
 
           <div className="space-y-1.5">

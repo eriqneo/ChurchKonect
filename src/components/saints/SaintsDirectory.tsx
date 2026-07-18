@@ -8,12 +8,13 @@ import {
   ContentRow,
   BottomSheet,
   SectionTitle,
-  Avatar,
-  SwipeableRow
+  Avatar
 } from '../shared';
 import { staggerChildren } from '../../lib/animations';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
-import { type PocketBaseMember, useChurchStructure, usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
+import { useChurchStructure } from '../../lib/db/pocketbaseHooks';
+import { type DirectoryMemberRecord } from '../../lib/db/churchConnectDB';
+import { useSaintsDirectoryData } from '../../lib/db/directoryData';
 import { EnrollMemberForm } from '../profile/EnrollMemberForm';
 import { 
   Users, 
@@ -29,30 +30,24 @@ import {
   Flame, 
   Baby, 
   SlidersHorizontal,
-  Mail,
-  Phone,
-  MessageSquare,
   ShieldCheck,
-  UserCheck,
-  Building,
-  MapPin,
-  Calendar,
-  AlertCircle
+  MapPin
 } from 'lucide-react';
 
 // ==========================================
-// Mock Data Configurations
+// Directory view models
 // ==========================================
 
 export interface Member {
   id: string;
+  userId?: string;
   name: string;
-  email: string;
-  phone: string;
   role: string;
   roleId: 'lead_pastor' | 'administrator' | 'cell_leader' | 'district_pastor' | 'department_head' | 'member' | 'guest';
   department: string;
-  joinedDate: string; // YYYY-MM-DD
+  departments: string[];
+  cellGroup: string;
+  section: string;
 }
 
 const MEMBER_ROLE_LABELS: Record<Member['roleId'], string> = {
@@ -69,17 +64,18 @@ function directoryRole(role: string): Member['roleId'] {
   return role in MEMBER_ROLE_LABELS ? role as Member['roleId'] : 'member';
 }
 
-function toDirectoryMember(member: PocketBaseMember): Member {
+function toDirectoryMember(member: DirectoryMemberRecord): Member {
   const roleId = directoryRole(member.role);
   return {
-    id: member.remoteId,
+    id: member.localId,
+    userId: member.userId,
     name: member.fullName,
-    email: member.email || 'No email provided',
-    phone: member.phone || 'No phone provided',
     role: MEMBER_ROLE_LABELS[roleId],
     roleId,
-    department: member.departments.join(', ') || member.cellGroupName || member.sectionName || 'General congregation',
-    joinedDate: member.createdAt?.slice(0, 10) || '—'
+    department: member.departments.join(', ') || 'General congregation',
+    departments: member.departments,
+    cellGroup: member.cellGroupName || 'Not assigned',
+    section: member.sectionName || 'Not assigned'
   };
 }
 
@@ -108,6 +104,7 @@ interface Pillar {
   id: string;
   name: string;
   head: string;
+  description?: string;
   membersCount: number;
   iconName: 'Worship' | 'Media' | 'Youth' | 'Children';
 }
@@ -123,24 +120,29 @@ const PILLAR_ICONS = {
 export function SaintsDirectory() {
   const { user } = useAuth();
   const {
-    members: remoteMembers,
-    refreshMembers,
+    members: directoryMembers,
+    countFor,
+    totalItems,
+    hasMore,
+    loadMore,
+    isLoadingMore,
+    refresh: refreshDirectory,
     isLoading: membersLoading,
     isRefreshing: membersRefreshing,
     error: membersError
-  } = usePocketBaseMembers();
+  } = useSaintsDirectoryData();
   const {
     cellGroups: remoteCellGroups,
     sections: remoteSections,
     departments: remoteDepartments,
     isLoading: structuresLoading
   } = useChurchStructure();
-  const members = remoteMembers.filter((member) => member.status === 'Active').map(toDirectoryMember);
+  const members = directoryMembers.map(toDirectoryMember);
   const cells: Cell[] = remoteCellGroups.map((group) => ({
     id: group.remoteId,
     name: group.name,
-    leader: group.leaderName || 'No leader assigned',
-    memberCount: remoteMembers.filter((member) => member.cellGroupId === group.remoteId && member.status === 'Active').length,
+    leader: group.leaderName || members.find((member) => member.userId === group.leaderId)?.name || 'No leader assigned',
+    memberCount: countFor('cell', group.remoteId),
     status: group.status,
     meetingDay: group.meetingDay,
     meetingTime: group.meetingTime,
@@ -162,16 +164,17 @@ export function SaintsDirectory() {
     id: department.remoteId || department.localId,
     name: department.name,
     head: department.headName || 'No head assigned',
-    membersCount: remoteMembers.filter((member) => member.departmentIds.includes(department.remoteId || department.localId) && member.status === 'Active').length,
+    description: department.description,
+    membersCount: countFor('department', department.remoteId || department.localId),
     iconName: pillarIcons[index % pillarIcons.length]
   }));
   const canManageMembers = user?.role === 'lead_pastor' || user?.role === 'administrator';
   // Navigation tabs list
   const TABS = [
-    { id: 'members', label: 'Members', count: 10 },
-    { id: 'cells', label: 'Cells', count: 3 },
-    { id: 'districts', label: 'Districts', count: 2 },
-    { id: 'pillars', label: 'Pillars', count: 4 }
+    { id: 'members', label: 'Members' },
+    { id: 'cells', label: 'Cells' },
+    { id: 'districts', label: 'Sections' },
+    { id: 'pillars', label: 'Pillars' }
   ] as const;
 
   type TabId = typeof TABS[number]['id'];
@@ -190,7 +193,7 @@ export function SaintsDirectory() {
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   // Accordion state (Districts) - only one open at a time
-  const [openDistrictId, setOpenDistrictId] = useState<string | null>('d1');
+  const [openDistrictId, setOpenDistrictId] = useState<string | null>(null);
 
   // Long press / Context Action Sheet states
   const [longPressedMember, setLongPressedMember] = useState<Member | null>(null);
@@ -209,10 +212,10 @@ export function SaintsDirectory() {
     member: true,
     guest: true
   });
-  const [sectionFilter, setSectionFilter] = useState<string>('All');
-  const [sortOption, setSortOption] = useState<'A-Z' | 'Newest' | 'Role'>('A-Z');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('All');
+  const [sortOption, setSortOption] = useState<'A-Z' | 'Role'>('A-Z');
 
-  // Haptic feedback simulator
+  // Haptic feedback where the device supports it.
   const triggerHaptic = () => {
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       try {
@@ -312,7 +315,7 @@ export function SaintsDirectory() {
       member: true,
       guest: true
     });
-    setSectionFilter('All');
+    setDepartmentFilter('All');
     setSortOption('A-Z');
     setSearchQuery('');
     showToast('Filters reset successfully');
@@ -325,7 +328,8 @@ export function SaintsDirectory() {
       // Search text filter
       const matchesSearch = 
         m.name.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-        m.email.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+        m.cellGroup.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
+        m.section.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
         m.department.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
         m.role.toLowerCase().includes(debouncedQuery.toLowerCase());
       
@@ -333,22 +337,20 @@ export function SaintsDirectory() {
       const matchesRole = roleFilter[m.roleId] !== false;
 
       // Section Filter
-      const matchesSection = sectionFilter === 'All' || m.department === sectionFilter;
+      const matchesDepartment = departmentFilter === 'All' || m.departments.includes(departmentFilter);
 
-      return matchesSearch && matchesRole && matchesSection;
+      return matchesSearch && matchesRole && matchesDepartment;
     })
     .sort((a, b) => {
       if (sortOption === 'A-Z') {
         return a.name.localeCompare(b.name);
-      } else if (sortOption === 'Newest') {
-        return b.joinedDate.localeCompare(a.joinedDate);
       } else {
         // Sort by role hierarchy weight
         const weight: Record<Member['roleId'], number> = { lead_pastor: 7, administrator: 6, district_pastor: 5, department_head: 4, cell_leader: 3, member: 2, guest: 1 };
         return weight[b.roleId] - weight[a.roleId];
       }
     });
-  const departmentOptions = Array.from(new Set(members.map((member) => member.department))).sort();
+  const departmentOptions = Array.from(new Set(members.flatMap((member) => member.departments))).sort();
 
   // 2. FILTER CELLS
   const filteredCells = cells.filter(c => {
@@ -488,7 +490,7 @@ export function SaintsDirectory() {
                 {/* Count and CTA trigger */}
                 <div className="flex items-center justify-between px-1">
                   <span className={`${Typography.CAPTION} text-text-muted font-bold tracking-wide`}>
-                    {filteredMembers.length} {filteredMembers.length === 1 ? 'member' : 'members'} found
+                    {filteredMembers.length} shown · {totalItems} confirmed
                   </span>
                   {canManageMembers && (
                     <button onClick={() => { triggerHaptic(); setShowAddMember(true); }} className="cursor-pointer">
@@ -544,41 +546,33 @@ export function SaintsDirectory() {
                           onTouchStart={() => handleMemberPressStart(member)}
                           onTouchEnd={handleMemberPressEnd}
                         >
-                          <SwipeableRow
-                            onSwipeStart={handleMemberPressEnd}
-                            actions={[
-                              {
-                                icon: <Phone className="w-4 h-4" />,
-                                label: 'Call',
-                                colorClassName: 'bg-[#7BC47F]',
-                                onPress: () => { triggerHaptic(); window.location.href = `tel:${member.phone}`; }
-                              },
-                              {
-                                icon: <MessageSquare className="w-4 h-4" />,
-                                label: 'Message',
-                                colorClassName: 'bg-gold-500',
-                                onPress: () => { triggerHaptic(); window.location.href = `sms:${member.phone}`; }
-                              }
-                            ]}
-                          >
-                            <ContentRow
-                              thumbnail={<Avatar name={member.name} size="md" ringClassName={getRoleColorClass(member.roleId)} />}
-                              title={member.name}
-                              subtitle={member.email}
-                              meta={member.department}
-                              action={
-                                <AccentBadge
-                                  label={member.role}
-                                  variant="muted"
-                                  size="sm"
-                                />
-                              }
-                              onPress={() => { triggerHaptic(); setSelectedMember(member); }}
-                            />
-                          </SwipeableRow>
+                          <ContentRow
+                            thumbnail={<Avatar name={member.name} size="md" ringClassName={getRoleColorClass(member.roleId)} />}
+                            title={member.name}
+                            subtitle={member.cellGroup}
+                            meta={member.department}
+                            action={
+                              <AccentBadge
+                                label={member.role}
+                                variant="muted"
+                                size="sm"
+                              />
+                            }
+                            onPress={() => { triggerHaptic(); setSelectedMember(member); }}
+                          />
                         </motion.div>
                       ))}
                     </motion.div>
+                  )}
+
+                  {hasMore && (
+                    <button
+                      onClick={() => void loadMore()}
+                      disabled={isLoadingMore}
+                      className="w-full mt-3 py-2.5 rounded-pill border border-gold-500/25 bg-gold-500/5 text-gold-700 dark:text-gold-400 text-xs font-bold disabled:opacity-50 cursor-pointer"
+                    >
+                      {isLoadingMore ? 'Loading more…' : `Load more members (${members.length} of ${totalItems})`}
+                    </button>
                   )}
 
                   {/* Thin elegant alphabetical index bar on the right edge */}
@@ -671,7 +665,7 @@ export function SaintsDirectory() {
                     <div className="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center text-text-muted">
                       <MapPin className="w-6 h-6" />
                     </div>
-                    <h3 className={`${Typography.SUBTITLE} text-text-primary`}>No districts found</h3>
+                    <h3 className={`${Typography.SUBTITLE} text-text-primary`}>No sections found</h3>
                   </div>
                 ) : (
                   filteredDistricts.map((dist) => {
@@ -717,7 +711,7 @@ export function SaintsDirectory() {
                             >
                               <div className="p-3 bg-white/[0.01] space-y-1">
                                 <span className="text-[9px] font-bold uppercase tracking-widest text-text-muted px-2 block mb-1">
-                                  Cells Under District
+                                  Fellowships in Section
                                 </span>
                                 {dist.cells.map((cellName, i) => (
                                   <ContentRow
@@ -728,11 +722,12 @@ export function SaintsDirectory() {
                                       </div>
                                     }
                                     title={cellName}
-                                    subtitle="Meets Weekly Wednesday"
-                                    meta="General District"
+                                    subtitle="Configured house fellowship"
+                                    meta={dist.name}
                                     onPress={() => {
                                       triggerHaptic();
-                                      showToast(`Viewing details for nested cell: ${cellName}`);
+                                      const selected = cells.find((cell) => cell.name === cellName);
+                                      if (selected) setSelectedCell(selected);
                                     }}
                                   />
                                 ))}
@@ -775,7 +770,7 @@ export function SaintsDirectory() {
                       </div>
 
                       <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between text-[11px] font-bold text-text-secondary">
-                        <span>{p.membersCount} staff members</span>
+                        <span>{p.membersCount} members</span>
                         <ChevronRight className="w-4 h-4 text-text-muted" />
                       </div>
                     </GlassCard>
@@ -842,8 +837,8 @@ export function SaintsDirectory() {
               Filter by Department
             </span>
             <select
-              value={sectionFilter}
-              onChange={(e) => { triggerHaptic(); setSectionFilter(e.target.value); }}
+              value={departmentFilter}
+              onChange={(e) => { triggerHaptic(); setDepartmentFilter(e.target.value); }}
               className="w-full bg-surface-100 dark:bg-surface-100 light:bg-surface-light-secondary border border-white/5 rounded-xl px-3.5 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500"
             >
               <option value="All">All Departments</option>
@@ -857,7 +852,7 @@ export function SaintsDirectory() {
               Sort Order
             </span>
             <div className="flex gap-2">
-              {(['A-Z', 'Newest', 'Role'] as const).map((opt) => {
+              {(['A-Z', 'Role'] as const).map((opt) => {
                 const isSelected = sortOption === opt;
                 return (
                   <button
@@ -926,30 +921,6 @@ export function SaintsDirectory() {
                 onClick={() => {
                   triggerHaptic();
                   setLongPressedMember(null);
-                  showToast(`Simulated message dispatched to ${longPressedMember.name}`);
-                }}
-                className="w-full flex items-center gap-3 p-3 bg-white/[0.01] hover:bg-white/5 border border-white/5 rounded-xl text-left text-sm font-bold text-text-primary"
-              >
-                <MessageSquare className="w-4 h-4 text-gold-500" />
-                <span>Message Member</span>
-              </button>
-
-              {canManageMembers && <button
-                onClick={() => {
-                  triggerHaptic();
-                  setLongPressedMember(null);
-                  showToast(`Role assignment pending verification for ${longPressedMember.name}`);
-                }}
-                className="w-full flex items-center gap-3 p-3 bg-white/[0.01] hover:bg-white/5 border border-white/5 rounded-xl text-left text-sm font-bold text-text-primary"
-              >
-                <UserCheck className="w-4 h-4 text-gold-500" />
-                <span>Assign Role</span>
-              </button>}
-
-              <button
-                onClick={() => {
-                  triggerHaptic();
-                  setLongPressedMember(null);
                   setSelectedMember(longPressedMember);
                 }}
                 className="w-full flex items-center gap-3 p-3 bg-white/[0.01] hover:bg-white/5 border border-white/5 rounded-xl text-left text-sm font-bold text-text-primary"
@@ -957,6 +928,9 @@ export function SaintsDirectory() {
                 <Users className="w-4 h-4 text-gold-500" />
                 <span>View Profile</span>
               </button>
+              <p className="px-2 text-[10px] leading-relaxed text-text-muted">
+                Contact details are kept in the protected registry and are not published in the church-wide directory.
+              </p>
             </div>
           </div>
         )}
@@ -994,22 +968,16 @@ export function SaintsDirectory() {
 
             <div className="border-t border-white/[0.04] pt-4 space-y-3">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-text-muted font-bold">Email Address</span>
-                <span className="text-text-primary font-semibold flex items-center gap-1">
-                  <Mail className="w-3.5 h-3.5 text-gold-500" /> {selectedMember.email}
-                </span>
+                <span className="text-text-muted font-bold">Fellowship</span>
+                <span className="text-text-primary font-semibold text-right">{selectedMember.cellGroup}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-text-muted font-bold">Contact Number</span>
-                <span className={`text-text-primary flex items-center gap-1 ${Typography.METRIC}`}>
-                  <Phone className="w-3.5 h-3.5 text-gold-500" /> {selectedMember.phone}
-                </span>
+                <span className="text-text-muted font-bold">Section</span>
+                <span className="text-text-primary font-semibold text-right">{selectedMember.section}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-text-muted font-bold">Enrollment Date</span>
-                <span className="text-text-primary font-semibold flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-gold-500" /> {selectedMember.joinedDate}
-                </span>
+                <span className="text-text-muted font-bold">Ministry</span>
+                <span className="text-text-primary font-semibold text-right">{selectedMember.department}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-text-muted font-bold">Registry status</span>
@@ -1019,22 +987,13 @@ export function SaintsDirectory() {
               </div>
             </div>
 
-            <div className="pt-4 flex gap-3">
-              <button
-                onClick={() => {
-                  triggerHaptic();
-                  setSelectedMember(null);
-                  window.location.href = selectedMember.phone !== 'No phone provided'
-                    ? `sms:${selectedMember.phone}`
-                    : `mailto:${selectedMember.email}`;
-                }}
-                className="flex-1 py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill text-center hover:bg-gold-400 transition-all cursor-pointer"
-              >
-                Send Message
-              </button>
+            <div className="pt-4 space-y-3">
+              <div className="rounded-card border border-sage-500/20 bg-sage-500/10 p-3 text-[10px] leading-relaxed text-sage-800 dark:text-sage-300">
+                This directory intentionally shows ministry placement only. Administrators can access contact details from the protected Registry CMS when ministry work requires it.
+              </div>
               <button
                 onClick={() => setSelectedMember(null)}
-                className="flex-1 py-2.5 bg-surface-100 text-text-primary font-bold text-xs rounded-pill text-center hover:bg-surface-200 transition-all cursor-pointer"
+                className="w-full py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill text-center hover:bg-gold-400 transition-all cursor-pointer"
               >
                 Close Profile
               </button>
@@ -1085,22 +1044,12 @@ export function SaintsDirectory() {
               </div>
             </div>
 
-            <div className="pt-4 flex gap-3">
-              <button
-                onClick={() => {
-                  triggerHaptic();
-                  setSelectedCell(null);
-                  showToast('Syllabus studies opened for cell leaders');
-                }}
-                className="flex-1 py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill cursor-pointer hover:bg-gold-400"
-              >
-                Access Study Guide
-              </button>
+            <div className="pt-4">
               <button
                 onClick={() => setSelectedCell(null)}
-                className="flex-1 py-2.5 bg-surface-100 text-text-primary font-bold text-xs rounded-pill"
+                className="w-full py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill cursor-pointer hover:bg-gold-400"
               >
-                Back
+                Close Fellowship
               </button>
             </div>
           </div>
@@ -1131,35 +1080,21 @@ export function SaintsDirectory() {
 
             <div className="space-y-3 text-xs">
               <p className="text-text-secondary leading-relaxed">
-                The {selectedPillar.name} operates to build active service pathways for congregation members, supporting regular liturgies and Sunday gathering infrastructure.
+                {selectedPillar.description || 'No department description has been added yet.'}
               </p>
 
               <div className="pt-2 border-t border-white/[0.04] space-y-2.5">
                 <div className="flex justify-between">
-                  <span className="text-text-muted font-bold">Volunteers / Staff</span>
-                  <span className="text-text-primary font-bold">{selectedPillar.membersCount} active volunteers</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted font-bold">Meeting Cadence</span>
-                  <span className="text-text-primary font-bold">Monthly Strategy / Weekly Prep</span>
+                  <span className="text-text-muted font-bold">Active Members</span>
+                  <span className="text-text-primary font-bold">{selectedPillar.membersCount}</span>
                 </div>
               </div>
             </div>
 
-            <div className="pt-4 flex gap-3">
-              <button
-                onClick={() => {
-                  triggerHaptic();
-                  setSelectedPillar(null);
-                  showToast('Volunteer onboarding flow initialized');
-                }}
-                className="flex-1 py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill cursor-pointer"
-              >
-                Volunteer Onboard
-              </button>
+            <div className="pt-4">
               <button
                 onClick={() => setSelectedPillar(null)}
-                className="flex-1 py-2.5 bg-surface-100 text-text-primary font-bold text-xs rounded-pill"
+                className="w-full py-2.5 bg-gold-500 text-black font-bold text-xs rounded-pill cursor-pointer hover:bg-gold-400"
               >
                 Close
               </button>
@@ -1180,7 +1115,7 @@ export function SaintsDirectory() {
       >
         <EnrollMemberForm
           onClose={() => setShowAddMember(false)}
-          onSuccess={() => { void refreshMembers(); }}
+          onSuccess={() => { void refreshDirectory(); }}
         />
       </BottomSheet>
 
