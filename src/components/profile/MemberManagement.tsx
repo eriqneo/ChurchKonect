@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useMemberReferences, usePocketBaseMembers, type PocketBaseMember } from '../../lib/db/pocketbaseHooks';
+import {
+  useMemberAccountLinks,
+  useMemberReferences,
+  usePocketBaseMembers,
+  type MemberAccountLink,
+  type PocketBaseMember
+} from '../../lib/db/pocketbaseHooks';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useToast } from '../shared/toast/useToast';
 import { EnrollMemberForm } from './EnrollMemberForm';
@@ -34,11 +40,15 @@ import {
   Square,
   Eye,
   Lock,
-  Compass
+  Compass,
+  Link2,
+  Unlink,
+  LoaderCircle
 } from 'lucide-react';
 
 export function MemberManagement() {
-  const { members, updateMember, deleteMember, resetPassword } = usePocketBaseMembers();
+  const { members, updateMember, deleteMember, resetPassword, refreshMembers } = usePocketBaseMembers();
+  const { accounts, refreshAccounts, linkAccount, unlinkAccount, isLoading: accountsLoading, error: accountsError } = useMemberAccountLinks();
   const { departments, cellGroups } = useMemberReferences();
   const { user } = useAuth();
   const toast = useToast();
@@ -61,6 +71,9 @@ export function MemberManagement() {
   // Sub-actions in Member Detail Sheet
   const [showEditSheet, setShowEditSheet] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [showAccountSheet, setShowAccountSheet] = useState(false);
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  const [accountActionPending, setAccountActionPending] = useState(false);
   const [passwordResetResult, setPasswordResetResult] = useState<{ email: string; fullName: string; delivery: 'email' } | null>(null);
 
   // Edit fields temp states
@@ -85,6 +98,8 @@ export function MemberManagement() {
     setEditCellGroupId(member.cellGroupId || '');
     setEditDepartments(member.departments || []);
     setPasswordResetResult(null);
+    setShowAccountSheet(false);
+    setShowUnlinkConfirm(false);
   };
 
   // Toggle filter selections
@@ -232,6 +247,45 @@ export function MemberManagement() {
     }
   };
 
+  const handleOpenAccountSheet = () => {
+    setShowAccountSheet(true);
+    setShowUnlinkConfirm(false);
+    void refreshAccounts();
+  };
+
+  const handleLinkAccount = async (account: MemberAccountLink) => {
+    if (!selectedMember) return;
+    setAccountActionPending(true);
+    try {
+      await linkAccount(selectedMember, account);
+      setSelectedMember({ ...selectedMember, userId: account.userId });
+      await refreshMembers();
+      toast.success('Login account linked securely.');
+    } catch (error) {
+      console.error('[Members] Account link failed:', error);
+      toast.error(error instanceof Error ? error.message : 'The login account could not be linked.');
+    } finally {
+      setAccountActionPending(false);
+    }
+  };
+
+  const handleUnlinkAccount = async () => {
+    if (!selectedMember) return;
+    setAccountActionPending(true);
+    try {
+      await unlinkAccount(selectedMember);
+      setSelectedMember({ ...selectedMember, userId: undefined });
+      setShowUnlinkConfirm(false);
+      await refreshMembers();
+      toast.success('Login account unlinked. The registry profile was kept.');
+    } catch (error) {
+      console.error('[Members] Account unlink failed:', error);
+      toast.error(error instanceof Error ? error.message : 'The login account could not be unlinked.');
+    } finally {
+      setAccountActionPending(false);
+    }
+  };
+
   const handleToggleEditDept = (dept: string) => {
     if (editDepartments.includes(dept)) {
       setEditDepartments(editDepartments.filter(d => d !== dept));
@@ -249,6 +303,15 @@ export function MemberManagement() {
 
   const isPastor = user?.role === 'lead_pastor';
   const canManage = isPastor || user?.role === 'administrator';
+  const linkedAccount = selectedMember?.userId
+    ? accounts.find((account) => account.userId === selectedMember.userId)
+    : undefined;
+  const compatibleAccounts = selectedMember
+    ? accounts.filter((account) => !account.memberId
+      && account.status === 'active'
+      && account.email.trim().toLowerCase() === selectedMember.email.trim().toLowerCase()
+      && account.role === selectedMember.role)
+    : [];
 
   return (
     <div className="space-y-4 pb-12">
@@ -506,6 +569,13 @@ export function MemberManagement() {
                   {selectedMember.status}
                 </span>
               </div>
+              <button
+                type="button"
+                onClick={handleOpenAccountSheet}
+                className={`mt-3 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-bold ${selectedMember.userId ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}
+              >
+                {selectedMember.userId ? <><Check className="h-3 w-3" /> Login linked</> : <><Link2 className="h-3 w-3" /> No app login</>}
+              </button>
             </div>
 
             {/* PASSWORD RESET SLIP DISPLAY */}
@@ -513,7 +583,7 @@ export function MemberManagement() {
               <GlassCard className="p-4 space-y-2 border border-emerald-500/30 bg-emerald-500/[0.02]">
                 <div className="flex justify-between items-center pb-1">
                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Check className="w-3.5 h-3.5" /> Reset Email Sent
+                    <Check className="w-3.5 h-3.5" /> Reset Requested
                   </span>
                   <button 
                     onClick={() => setPasswordResetResult(null)}
@@ -532,7 +602,7 @@ export function MemberManagement() {
                     <span className="truncate font-medium text-emerald-600 dark:text-emerald-400">{passwordResetResult.email}</span>
                   </div>
                   <div className="border-t border-white/5 pt-2 text-[10px] leading-relaxed text-text-muted">
-                    PocketBase sent a one-time reset link. No password is displayed or stored by ChurchConnect.
+                    PocketBase accepted the secure reset request. Delivery depends on the configured church email service; no password is displayed or stored by ChurchConnect.
                   </div>
                 </div>
               </GlassCard>
@@ -558,17 +628,30 @@ export function MemberManagement() {
                   </div>
                 </button>
 
-                {/* 2. Reset Password Button */}
-                <button
-                  onClick={handleResetPasswordAction}
-                  className="p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/5 hover:border-emerald-500/20 text-xs font-bold text-text-primary flex items-center gap-2.5 transition-all cursor-pointer"
-                >
-                  <KeyRound className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
-                  <div className="flex flex-col text-left">
-                    <span>Reset password</span>
-                    <span className="text-[9px] text-text-muted font-normal mt-0.5">Send secure email link</span>
-                  </div>
-                </button>
+                {/* 2. Login Account Button */}
+                {selectedMember.userId ? (
+                  <button
+                    onClick={handleResetPasswordAction}
+                    className="p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/5 hover:border-emerald-500/20 text-xs font-bold text-text-primary flex items-center gap-2.5 transition-all cursor-pointer"
+                  >
+                    <KeyRound className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Reset password</span>
+                      <span className="text-[9px] text-text-muted font-normal mt-0.5">Request secure email link</span>
+                    </div>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleOpenAccountSheet}
+                    className="p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/5 hover:border-sky-500/20 text-xs font-bold text-text-primary flex items-center gap-2.5 transition-all cursor-pointer"
+                  >
+                    <Link2 className="w-4.5 h-4.5 text-sky-500 flex-shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Link login</span>
+                      <span className="text-[9px] text-text-muted font-normal mt-0.5">Enable app access</span>
+                    </div>
+                  </button>
+                )}
 
                 {/* 3. Soft Delete / Deactivate */}
                 <button
@@ -648,6 +731,79 @@ export function MemberManagement() {
         )}
       </BottomSheet>
 
+      {/* LOGIN ACCOUNT LINKING */}
+      <BottomSheet
+        isOpen={showAccountSheet && selectedMember !== null}
+        onClose={() => { setShowAccountSheet(false); setShowUnlinkConfirm(false); }}
+        title="App Login Access"
+      >
+        {selectedMember && (
+          <div className="space-y-4 pb-6 text-left">
+            <div className="rounded-2xl border border-border-subtle bg-surface-100 p-4">
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${selectedMember.userId ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}>
+                  {selectedMember.userId ? <Check className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-extrabold text-text-primary">{selectedMember.fullName}</h3>
+                  <p className="truncate text-xs text-text-muted">{selectedMember.email}</p>
+                </div>
+              </div>
+            </div>
+
+            {selectedMember.userId ? (
+              <div className="space-y-3">
+                <GlassCard className="space-y-2 p-4 text-xs">
+                  <div className="flex items-center justify-between gap-3"><span className="text-text-muted">Account</span><strong className="truncate">{linkedAccount?.email || selectedMember.email}</strong></div>
+                  <div className="flex items-center justify-between gap-3"><span className="text-text-muted">Role</span><strong className="capitalize">{(linkedAccount?.role || selectedMember.role).replaceAll('_', ' ')}</strong></div>
+                  <div className="flex items-center justify-between gap-3"><span className="text-text-muted">Status</span><AccentBadge label={(linkedAccount?.status || 'linked').toUpperCase()} variant="sage" size="sm" /></div>
+                </GlassCard>
+                <p className="px-1 text-[11px] leading-relaxed text-text-muted">The login and registry remain separate records joined by this secure link. Unlinking removes app-to-profile access but does not delete either record.</p>
+                {showUnlinkConfirm ? (
+                  <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+                    <p className="text-xs font-bold text-text-primary">Remove this login link?</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-text-muted">The member may lose access to personal Academy, cell, and profile data until linked again.</p>
+                    <div className="mt-3 flex gap-2">
+                      <button type="button" onClick={() => setShowUnlinkConfirm(false)} disabled={accountActionPending} className="min-h-11 flex-1 rounded-pill border border-border-subtle bg-surface-100 text-xs font-bold text-text-secondary">Keep linked</button>
+                      <button type="button" onClick={handleUnlinkAccount} disabled={accountActionPending} className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-pill bg-red-600 text-xs font-extrabold text-white disabled:opacity-50">{accountActionPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />} Unlink</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setShowUnlinkConfirm(true)} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-pill border border-red-500/20 bg-red-500/5 text-xs font-extrabold text-red-700 dark:text-red-400"><Unlink className="h-4 w-4" /> Unlink login account</button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-[11px] leading-relaxed text-text-secondary">
+                  For safety, an existing active login can be linked only when its email and role exactly match this registry profile.
+                </div>
+                {accountsLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-xs font-bold text-text-muted"><LoaderCircle className="h-4 w-4 animate-spin" /> Checking login accounts…</div>
+                ) : accountsError ? (
+                  <button type="button" onClick={() => void refreshAccounts()} className="w-full rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-left text-xs font-bold text-red-700 dark:text-red-400">{accountsError} Tap to retry.</button>
+                ) : compatibleAccounts.length > 0 ? (
+                  <div className="space-y-2">
+                    <span className="px-1 text-[10px] font-bold uppercase tracking-widest text-text-muted">Eligible login account</span>
+                    {compatibleAccounts.map((account) => (
+                      <button key={account.userId} type="button" disabled={accountActionPending} onClick={() => void handleLinkAccount(account)} className="flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-surface-100 p-3 text-left disabled:opacity-50">
+                        <span className="min-w-0"><strong className="block truncate text-xs text-text-primary">{account.name}</strong><span className="block truncate text-[11px] text-text-muted">{account.email}</span></span>
+                        {accountActionPending ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-gold-500" /> : <span className="shrink-0 rounded-full bg-gold-500 px-3 py-1.5 text-[10px] font-extrabold text-black">Link</span>}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-border-subtle bg-surface-100 p-4 text-center">
+                    <Lock className="mx-auto h-6 w-6 text-text-muted" />
+                    <h4 className="mt-2 text-xs font-extrabold text-text-primary">No matching login account</h4>
+                    <p className="mt-1 text-[11px] leading-relaxed text-text-muted">A server administrator must first provision an active account for <strong>{selectedMember.email}</strong> with the <strong className="capitalize">{selectedMember.role.replaceAll('_', ' ')}</strong> role.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
       {/* 1. EDIT PROFILE BOTTOM SHEET */}
       <BottomSheet
         isOpen={showEditSheet}
@@ -683,10 +839,12 @@ export function MemberManagement() {
             <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Email Address</span>
             <input
               type="email"
+              disabled={Boolean(selectedMember?.userId)}
               value={editEmail}
               onChange={(e) => setEditEmail(e.target.value)}
-              className="w-full p-3 rounded-card bg-surface-200 text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none"
+              className="w-full p-3 rounded-card bg-surface-200 text-sm border border-transparent focus:ring-2 focus:ring-gold-500/40 focus:border-gold-500 text-text-primary outline-none disabled:cursor-not-allowed disabled:opacity-60"
             />
+            {selectedMember?.userId && <p className="text-[10px] leading-relaxed text-text-muted">Unlink the login account before changing the registry email.</p>}
           </div>
 
           {/* Change Role - Restricted */}
@@ -700,7 +858,7 @@ export function MemberManagement() {
                 { id: 'administrator', label: 'Administrator' }
               ].map((roleOption) => {
                 const isSelected = editRole === roleOption.id;
-                const isDisabled = roleOption.id === 'administrator' && !isPastor;
+                const isDisabled = Boolean(selectedMember?.userId) || (roleOption.id === 'administrator' && !isPastor);
 
                 return (
                   <button
@@ -720,6 +878,7 @@ export function MemberManagement() {
                 );
               })}
             </div>
+            {selectedMember?.userId && <p className="text-[10px] leading-relaxed text-text-muted">Linked roles are protected from drifting apart. Unlink the login account before changing this role.</p>}
           </div>
 
           {/* Edit Cell Group */}

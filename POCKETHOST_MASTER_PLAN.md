@@ -213,6 +213,7 @@ currently visible module.
 |---|---|---|
 | `users` | Server auth collection | Minimal active-user cache; never offline-created by normal clients |
 | `members` | Server | Scoped read cache; enrollment/edit requires server |
+| `member_account_directory` | Server read-only projection | Never cached; leadership-only online account linking |
 | `departments`, `sections` | Server | Long-lived reference cache |
 | `cell_groups` | Server | Scoped read cache; admin changes require server |
 | `cell_meetings` | Server | Recent cache; critical create/update may queue |

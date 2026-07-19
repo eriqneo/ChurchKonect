@@ -38,6 +38,17 @@ export interface PocketBaseMember {
   cacheOwnerId: string;
 }
 
+export interface MemberAccountLink {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  status: 'active' | 'inactive' | 'suspended';
+  memberId?: string;
+  memberName?: string;
+}
+
 export interface MemberReference {
   id: string;
   name: string;
@@ -633,4 +644,73 @@ export function usePocketBaseMembers() {
     isRefreshing,
     error
   };
+}
+
+export function useMemberAccountLinks() {
+  const { pb, user } = useAuth();
+  const [accounts, setAccounts] = useState<MemberAccountLink[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshAccounts = useCallback(async () => {
+    if (!user || !['administrator', 'lead_pastor'].includes(user.role)) {
+      setAccounts([]);
+      return [];
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      const records = await pb.collection('member_account_directory').getFullList({ sort: 'name,email' });
+      const mapped = records.map((record): MemberAccountLink => ({
+        id: record.id,
+        userId: record.userId,
+        name: record.name || record.email,
+        email: record.email || '',
+        role: record.role || 'member',
+        status: record.status || 'inactive',
+        memberId: record.memberId || undefined,
+        memberName: record.memberName || undefined
+      }));
+      setAccounts(mapped);
+      return mapped;
+    } catch (refreshError) {
+      console.error('[Members] Account directory refresh failed:', refreshError);
+      setError('Login accounts could not be loaded. Check your connection and try again.');
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, [pb, user]);
+
+  const linkAccount = useCallback(async (member: PocketBaseMember, account: MemberAccountLink) => {
+    if (!user) throw new Error('Authentication is required.');
+    if (account.memberId) throw new Error('That login account is already linked to a registry profile.');
+    if (account.email.trim().toLowerCase() !== member.email.trim().toLowerCase()) {
+      throw new Error('The registry email must exactly match the login email.');
+    }
+    if (account.role !== member.role) {
+      throw new Error('The registry role must match the login account role.');
+    }
+    await pb.collection('members').update(member.remoteId, { user: account.userId });
+    await recordAuditEvent(pb, user, {
+      action: 'member_account_linked',
+      summary: `Linked a login account to ${member.fullName}.`,
+      entityType: 'member', entityId: member.remoteId
+    });
+    await refreshAccounts();
+  }, [pb, refreshAccounts, user]);
+
+  const unlinkAccount = useCallback(async (member: PocketBaseMember) => {
+    if (!user) throw new Error('Authentication is required.');
+    if (!member.userId) throw new Error('This registry profile has no linked login account.');
+    await pb.collection('members').update(member.remoteId, { user: '' });
+    await recordAuditEvent(pb, user, {
+      action: 'member_account_unlinked',
+      summary: `Unlinked the login account from ${member.fullName}.`,
+      entityType: 'member', entityId: member.remoteId
+    });
+    await refreshAccounts();
+  }, [pb, refreshAccounts, user]);
+
+  return { accounts, refreshAccounts, linkAccount, unlinkAccount, isLoading, error };
 }

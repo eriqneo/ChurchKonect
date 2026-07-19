@@ -160,6 +160,29 @@ npm run backend:bootstrap-saints-directory -- --email=YOUR_SUPERUSER_EMAIL --tra
 The versioned schemas are in `pb_migrations/202607190230_create_saints_directory.js` and
 `pb_migrations/202607190800_create_user_preferences.js`.
 
+## Member login account linking
+
+Registry profiles and PocketBase login accounts remain separate records. Administrators and the
+Lead Pastor can inspect a leadership-only `member_account_directory` projection and link an
+existing active login from a member's Registry Card. The server accepts a new link only when the
+email and role match exactly, and a unique index prevents one login from being attached to more
+than one member profile. Once linked, registry email and role changes are blocked until the account
+is deliberately unlinked, preventing identity and authorization drift.
+
+Linking and unlinking are online-only, audited operations. Unlinking preserves both the registry
+profile and login account; it only removes their relationship. Login creation remains a privileged
+server provisioning task and no administrator credentials or generated passwords are exposed to
+the frontend.
+
+To reconcile the projection and run disposable leadership, member, anonymous, mismatch,
+immutability, unique-link, and unlink tests:
+
+```bash
+npm run backend:bootstrap-account-linking -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The versioned schema is in `pb_migrations/202607191000_create_member_account_links.js`.
+
 ## Cell meetings, attendance, visitors, and reports
 
 Fellowship operations are local-first: leaders can start a meeting, take attendance, add visitors,
