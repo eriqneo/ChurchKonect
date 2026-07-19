@@ -226,6 +226,7 @@ currently visible module.
 | `prayer_requests` | Server, strict rules | Server-first; sensitive draft policy |
 | `prayer_assignments`, `intercessory_teams` | Server, strict rules | Authorized metadata cache only |
 | `announcements`, `notifications` | Server | Small read cache; realtime invalidation |
+| `calendar_exportable_events`, `calendar_event_exports` | Server projection + account-owned state | Small account-scoped snapshot; online writes only |
 | `audit_logs` | Server append-only | Queue only with its originating offline command |
 | `feedback` | Server | May queue if content policy permits |
 | `appSettings` | Device | Local-only preferences; never an identity authority |

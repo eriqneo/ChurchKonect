@@ -25,6 +25,7 @@ import { GlassCard, AccentBadge, SectionTitle, BottomSheet } from '../shared';
 import * as Typography from '../../lib/theme/typography';
 import { useToast } from '../shared/toast/useToast';
 import { useAnnouncementsData, type AnnouncementView as Announcement } from '../../lib/db/announcementData';
+import { isCurrentCalendarExport, useCalendarEventExports, type CalendarExportMethod } from '../../lib/db/calendarEventData';
 import { exportToIcs, buildGoogleCalendarUrl, copyEventDetails } from './CalendarExport';
 
 interface AnnouncementsModuleProps {
@@ -47,26 +48,16 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
     archiveAnnouncement,
     setPinned
   } = useAnnouncementsData();
+  const {
+    byAnnouncementId: calendarExports,
+    savingAnnouncementId: calendarSavingId,
+    recordExport: recordCalendarExport
+  } = useCalendarEventExports();
   const [isSaving, setIsSaving] = useState(false);
 
   // Calendar Sheet & Saved States
   const [isCalendarSheetOpen, setIsCalendarSheetOpen] = useState(false);
   const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<Announcement | null>(null);
-  const [addedEventIds, setAddedEventIds] = useState<Record<string, boolean>>(() => {
-    const saved = localStorage.getItem('churchconnect_added_events');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return {};
-      }
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem('churchconnect_added_events', JSON.stringify(addedEventIds));
-  }, [addedEventIds]);
 
   // Basic Form States
   const [isNewFormOpen, setIsNewFormOpen] = useState(false);
@@ -376,7 +367,16 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
     setIsCalendarSheetOpen(true);
   };
 
-  const handleSelectIcs = () => {
+  const syncCalendarExport = async (announcement: Announcement, method: CalendarExportMethod) => {
+    try {
+      await recordCalendarExport(announcement, method);
+      toast.success('Calendar export prepared and synced across your devices.');
+    } catch (cause) {
+      toast.warning(cause instanceof Error ? cause.message : 'The calendar export was prepared, but its status did not sync.');
+    }
+  };
+
+  const handleSelectIcs = async () => {
     if (!selectedCalendarEvent) return;
     triggerHaptic();
     const success = exportToIcs({
@@ -387,15 +387,14 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
       eventLocation: selectedCalendarEvent.eventLocation
     });
     if (success) {
-      setAddedEventIds(prev => ({ ...prev, [selectedCalendarEvent.id]: true }));
-      toast.success('Added to calendar ✓');
       setIsCalendarSheetOpen(false);
+      await syncCalendarExport(selectedCalendarEvent, 'ics');
     } else {
       toast.error('Failed to export event');
     }
   };
 
-  const handleSelectGoogle = () => {
+  const handleSelectGoogle = async () => {
     if (!selectedCalendarEvent) return;
     triggerHaptic();
     const url = buildGoogleCalendarUrl({
@@ -405,10 +404,14 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
       eventTime: selectedCalendarEvent.eventTime,
       eventLocation: selectedCalendarEvent.eventLocation
     });
-    window.open(url, '_blank');
-    setAddedEventIds(prev => ({ ...prev, [selectedCalendarEvent.id]: true }));
-    toast.success('Added to calendar ✓');
+    const opened = window.open(url, '_blank');
+    if (!opened) {
+      toast.error('Your browser blocked the Google Calendar window. Allow pop-ups and try again.');
+      return;
+    }
+    opened.opener = null;
     setIsCalendarSheetOpen(false);
+    await syncCalendarExport(selectedCalendarEvent, 'google');
   };
 
   const handleSelectCopy = async () => {
@@ -777,6 +780,8 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
                 activeMemberList.map((ann) => {
                   const isExpanded = expandedIds[ann.id];
                   const isUrgent = ann.tag === 'Urgent';
+                  const calendarExport = calendarExports[ann.id];
+                  const calendarExportIsCurrent = isCurrentCalendarExport(calendarExport, ann);
                   
                   return (
                     <motion.div
@@ -848,21 +853,16 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
                               <span>{formatEventTime(ann.eventTime)} · {ann.eventLocation || 'Main Sanctuary'}</span>
                             </div>
 
-                            {/* Add to Calendar Button with dynamic state */}
-                            {addedEventIds[ann.id] ? (
-                              <div className="mt-1.5 w-full h-8.5 rounded-full bg-sage-500/10 text-sage-600 dark:text-sage-400 font-extrabold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 border border-sage-500/20">
-                                <span>Added ✓</span>
-                              </div>
-                            ) : (
-                              <button
-                                id={`calendar-add-btn-${ann.id}`}
-                                onClick={() => handleAddToCalendarClick(ann)}
-                                className="mt-1.5 w-full h-8.5 rounded-full bg-gold-500/10 hover:bg-gold-500 text-gold-500 hover:text-black font-extrabold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>+ Add to Calendar</span>
-                              </button>
-                            )}
+                            {/* Calendar export state is account-owned and server-confirmed. */}
+                            <button
+                              id={`calendar-add-btn-${ann.id}`}
+                              onClick={() => handleAddToCalendarClick(ann)}
+                              disabled={calendarSavingId === ann.id}
+                              className={`mt-1.5 w-full min-h-9 rounded-full font-extrabold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:cursor-wait disabled:opacity-60 ${calendarExportIsCurrent ? 'border border-sage-500/20 bg-sage-500/10 text-sage-700 dark:text-sage-400' : 'bg-gold-500/10 hover:bg-gold-500 text-gold-600 dark:text-gold-400 hover:text-black'}`}
+                            >
+                              <Download className={`w-3.5 h-3.5 ${calendarSavingId === ann.id ? 'animate-pulse' : ''}`} />
+                              <span>{calendarSavingId === ann.id ? 'Syncing export…' : calendarExportIsCurrent ? 'Export again · Synced ✓' : calendarExport ? 'Update calendar export' : '+ Export to Calendar'}</span>
+                            </button>
                           </div>
                         )}
 
@@ -1244,6 +1244,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
             <button
               id="calendar-option-apple"
               onClick={handleSelectIcs}
+              disabled={calendarSavingId === selectedCalendarEvent?.id}
               className="w-full h-13 px-4 rounded-xl bg-theme-bg-secondary hover:bg-theme-text/5 border border-theme-border flex items-center justify-between text-left transition-all cursor-pointer group"
             >
               <div className="flex items-center gap-3">
@@ -1261,6 +1262,7 @@ export function AnnouncementsModule({ currentRole }: AnnouncementsModuleProps) {
             <button
               id="calendar-option-google"
               onClick={handleSelectGoogle}
+              disabled={calendarSavingId === selectedCalendarEvent?.id}
               className="w-full h-13 px-4 rounded-xl bg-theme-bg-secondary hover:bg-theme-text/5 border border-theme-border flex items-center justify-between text-left transition-all cursor-pointer group"
             >
               <div className="flex items-center gap-3">

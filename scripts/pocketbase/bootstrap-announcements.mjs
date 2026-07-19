@@ -6,6 +6,34 @@ import PocketBase from 'pocketbase';
 const AUTHENTICATED = '@request.auth.id != ""';
 const MANAGER = '(@request.auth.role = "administrator" || @request.auth.role = "lead_pastor" || @request.auth.role = "district_pastor")';
 const VISIBLE = '(status = "published" && publishAt <= @now && (expiresAt = "" || expiresAt > @now))';
+const OWN_CALENDAR_EXPORT = 'user = @request.auth.id';
+const CURRENT_EXPORTABLE_VERSION = '(@collection.calendar_exportable_events.announcementId ?= announcement && @collection.calendar_exportable_events.eventTitle ?= titleSnapshot && @collection.calendar_exportable_events.eventBody ?= bodySnapshot && @collection.calendar_exportable_events.eventDate ?= eventDateSnapshot && @collection.calendar_exportable_events.eventTime ?= eventTimeSnapshot && @collection.calendar_exportable_events.eventLocation ?= eventLocationSnapshot)';
+const CURRENT_REQUEST_EXPORTABLE_VERSION = '(@collection.calendar_exportable_events.announcementId ?= announcement && @collection.calendar_exportable_events.eventTitle ?= @request.body.titleSnapshot && @collection.calendar_exportable_events.eventBody ?= @request.body.bodySnapshot && @collection.calendar_exportable_events.eventDate ?= @request.body.eventDateSnapshot && @collection.calendar_exportable_events.eventTime ?= @request.body.eventTimeSnapshot && @collection.calendar_exportable_events.eventLocation ?= @request.body.eventLocationSnapshot)';
+const EXPORTABLE_EVENTS_QUERY = `
+  SELECT
+    a.id AS id,
+    a.id AS announcementId,
+    a.title AS eventTitle,
+    a.body AS eventBody,
+    substr(a.eventDate, 1, 10) AS eventDate,
+    a.eventTime AS eventTime,
+    a.eventLocation AS eventLocation
+  FROM announcements a
+  WHERE a.tag = 'Event'
+    AND a.status = 'published'
+    AND a.publishAt <= datetime('now')
+    AND (a.expiresAt = '' OR a.expiresAt > datetime('now'))
+`;
+
+function eventSnapshot(event) {
+  return {
+    titleSnapshot: event.title,
+    bodySnapshot: event.body,
+    eventDateSnapshot: String(event.eventDate || '').slice(0, 10),
+    eventTimeSnapshot: event.eventTime || '',
+    eventLocationSnapshot: event.eventLocation || ''
+  };
+}
 
 function argument(name, fallback = '') {
   const prefix = `--${name}=`;
@@ -75,11 +103,12 @@ function curlFetch(input, init = {}) {
 
 function mergeFields(existingFields, desiredFields) {
   const desired = new Map(desiredFields.map((field) => [field.name, field]));
-  const merged = existingFields.map((field) => {
+  const merged = existingFields.flatMap((field) => {
     const next = desired.get(field.name);
-    if (!next) return field;
+    if (!next) return [field];
     desired.delete(field.name);
-    return { ...field, ...next, id: field.id };
+    if (field.type !== next.type) return [next];
+    return [{ ...field, ...next, id: field.id }];
   });
   return [...merged, ...desired.values()];
 }
@@ -89,7 +118,15 @@ async function reconcileCollection(pb, definition) {
   try { existing = await pb.collections.getOne(definition.name); } catch (error) { if (error?.status !== 404) throw error; }
   const payload = existing ? { ...definition, fields: mergeFields(existing.fields ?? [], definition.fields) } : definition;
   const saved = existing ? await pb.collections.update(existing.id, payload) : await pb.collections.create(payload);
-  console.log('✓ announcements schema, indexes, and rules reconciled');
+  console.log(`✓ ${definition.name} schema, indexes, and rules reconciled`);
+  return saved;
+}
+
+async function reconcileView(pb, definition) {
+  let existing;
+  try { existing = await pb.collections.getOne(definition.name); } catch (error) { if (error?.status !== 404) throw error; }
+  const saved = existing ? await pb.collections.update(existing.id, definition) : await pb.collections.create(definition);
+  console.log(`✓ ${definition.name} read-only projection reconciled`);
   return saved;
 }
 
@@ -118,7 +155,7 @@ async function main() {
   console.log('✓ Superuser authentication');
   const users = await superuser.collections.getOne('users');
 
-  await reconcileCollection(superuser, {
+  const announcements = await reconcileCollection(superuser, {
     type: 'base', name: 'announcements',
     listRule: `${AUTHENTICATED} && (${MANAGER} || ${VISIBLE})`,
     viewRule: `${AUTHENTICATED} && (${MANAGER} || ${VISIBLE})`,
@@ -144,13 +181,41 @@ async function main() {
     ]
   });
 
+  await reconcileView(superuser, {
+    type: 'view', name: 'calendar_exportable_events', viewQuery: EXPORTABLE_EVENTS_QUERY,
+    listRule: AUTHENTICATED, viewRule: AUTHENTICATED,
+    createRule: null, updateRule: null, deleteRule: null
+  });
+
+  await reconcileCollection(superuser, {
+    type: 'base', name: 'calendar_event_exports',
+    listRule: `${AUTHENTICATED} && ${OWN_CALENDAR_EXPORT}`,
+    viewRule: `${AUTHENTICATED} && ${OWN_CALENDAR_EXPORT}`,
+    createRule: `${AUTHENTICATED} && ${OWN_CALENDAR_EXPORT} && ${CURRENT_EXPORTABLE_VERSION}`,
+    updateRule: `${AUTHENTICATED} && ${OWN_CALENDAR_EXPORT} && @request.body.user:changed = false && @request.body.announcement:changed = false && ${CURRENT_REQUEST_EXPORTABLE_VERSION}`,
+    deleteRule: `${AUTHENTICATED} && ${OWN_CALENDAR_EXPORT}`,
+    fields: [
+      { name: 'user', type: 'relation', required: true, collectionId: users.id, maxSelect: 1, cascadeDelete: true },
+      { name: 'announcement', type: 'relation', required: true, collectionId: announcements.id, maxSelect: 1, cascadeDelete: true },
+      { name: 'method', type: 'select', required: true, maxSelect: 1, values: ['ics', 'google'] },
+      { name: 'titleSnapshot', type: 'text', required: true, max: 80 },
+      { name: 'bodySnapshot', type: 'text', required: true, max: 600 },
+      { name: 'eventDateSnapshot', type: 'text', required: true, max: 10 },
+      { name: 'eventTimeSnapshot', type: 'text', max: 10 },
+      { name: 'eventLocationSnapshot', type: 'text', max: 200 }
+    ],
+    indexes: [
+      'CREATE UNIQUE INDEX idx_calendar_event_exports_owner_event ON calendar_event_exports (user, announcement)'
+    ]
+  });
+
   await removeStaleTests(superuser);
   const suffix = Date.now().toString(36);
   const credentials = Object.fromEntries(['admin', 'district', 'member'].map((key) => [key, {
     email: `announce-${key}-${suffix}@example.com`, password: temporaryPassword(),
     role: key === 'admin' ? 'administrator' : key === 'district' ? 'district_pastor' : 'member'
   }]));
-  const created = { users: [], announcements: [] };
+  const created = { users: [], announcements: [], calendar_event_exports: [] };
 
   try {
     const userRecords = {};
@@ -185,6 +250,12 @@ async function main() {
       publishAt: new Date(Date.now() - 7_200_000).toISOString(), expiresAt: new Date(Date.now() - 3_600_000).toISOString()
     });
     created.announcements.push(active.id, scheduled.id, expired.id);
+    const event = await clients.admin.collection('announcements').create({
+      id: recordId(), ...base, title: `TEST ANNOUNCEMENT EVENT ${suffix}`, tag: 'Event',
+      eventDate: new Date(Date.now() + 86_400_000).toISOString(), eventTime: '10:00', eventLocation: 'Test Sanctuary',
+      publishAt: new Date(Date.now() - 60_000).toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString()
+    });
+    created.announcements.push(event.id);
     console.log('✓ Administrator created active, scheduled, and expired announcements');
 
     const visible = await clients.member.collection('announcements').getList(1, 200);
@@ -211,12 +282,64 @@ async function main() {
     await clients.district.collection('announcements').update(districtPost.id, { pinned: true });
     console.log('✓ District pastor management matches the existing app role');
 
+    const eventProjection = await clients.member.collection('calendar_exportable_events').getOne(event.id);
+    const snapshot = eventSnapshot(event);
+    for (const [field, value] of Object.entries({
+      eventTitle: snapshot.titleSnapshot,
+      eventBody: snapshot.bodySnapshot,
+      eventDate: snapshot.eventDateSnapshot,
+      eventTime: snapshot.eventTimeSnapshot,
+      eventLocation: snapshot.eventLocationSnapshot
+    })) {
+      if ((eventProjection[field] || '') !== value) {
+        throw new Error(`Calendar event projection mismatch on ${field}: expected "${value}" but saw "${eventProjection[field] || ''}".`);
+      }
+    }
+    console.log('✓ Calendar export projection matches the app event snapshot');
+
+    const calendarExport = await clients.member.collection('calendar_event_exports').create({
+      id: recordId(), user: userRecords.member.id, announcement: event.id,
+      method: 'ics', ...snapshot
+    });
+    created.calendar_event_exports.push(calendarExport.id);
+    const ownExports = await clients.member.collection('calendar_event_exports').getFullList();
+    if (ownExports.length !== 1 || ownExports[0].announcement !== event.id) throw new Error('Member calendar export was not account-scoped.');
+    console.log('✓ Member calendar export state persists under the signed-in account');
+    await expectRejected('Another member cannot inspect calendar export state', () => clients.district.collection('calendar_event_exports').getOne(calendarExport.id));
+    await expectRejected('Calendar export owner cannot be spoofed', () => clients.member.collection('calendar_event_exports').create({
+      id: recordId(), user: userRecords.district.id, announcement: event.id, method: 'ics', ...eventSnapshot(event)
+    }));
+    await expectRejected('Non-event announcement cannot be tracked as a calendar export', () => clients.member.collection('calendar_event_exports').create({
+      id: recordId(), user: userRecords.member.id, announcement: active.id, method: 'ics', ...eventSnapshot(active)
+    }));
+    await expectRejected('Duplicate event export state is rejected', () => clients.member.collection('calendar_event_exports').create({
+      id: recordId(), user: userRecords.member.id, announcement: event.id, method: 'google', ...eventSnapshot(event)
+    }));
+    await expectRejected('Stale event version cannot be marked current', () => clients.member.collection('calendar_event_exports').update(calendarExport.id, {
+      method: 'google', ...eventSnapshot(event), titleSnapshot: 'Stale event title'
+    }));
+    const updatedExport = await clients.member.collection('calendar_event_exports').update(calendarExport.id, {
+      method: 'google', ...eventSnapshot(event)
+    });
+    if (updatedExport.method !== 'google') throw new Error('Calendar export method update did not persist.');
+    console.log('✓ Current event version can be re-exported without creating duplicates');
+    await expectRejected('Calendar export relation is immutable', () => clients.member.collection('calendar_event_exports').update(calendarExport.id, { announcement: active.id, ...eventSnapshot(active) }));
+    await expectRejected('Another account cannot delete calendar export state', () => clients.district.collection('calendar_event_exports').delete(calendarExport.id));
+    const anonymousExports = await new PocketBase(url).collection('calendar_event_exports').getList(1, 10);
+    if (anonymousExports.totalItems !== 0) throw new Error('Anonymous calendar export listing exposed rows.');
+    console.log('✓ Anonymous calendar export listing exposes no rows');
+    await clients.member.collection('calendar_event_exports').delete(calendarExport.id);
+    console.log('✓ Member can clear their own calendar export state');
+
     await clients.admin.collection('announcements').update(active.id, { status: 'archived' });
     await expectRejected('Archived announcement hidden from members', () => clients.member.collection('announcements').getOne(active.id));
     const retained = await clients.admin.collection('announcements').getOne(active.id);
     if (retained.status !== 'archived') throw new Error('Archived record was not retained for leadership.');
     console.log('✓ Archive is retained for leadership and removed from member timelines');
   } finally {
+    for (const id of created.calendar_event_exports.reverse()) {
+      try { await superuser.collection('calendar_event_exports').delete(id); } catch { /* Already removed. */ }
+    }
     for (const id of created.announcements.reverse()) {
       try { await superuser.collection('announcements').delete(id); } catch { /* Already removed. */ }
     }

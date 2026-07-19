@@ -183,6 +183,29 @@ npm run backend:bootstrap-account-linking -- --email=YOUR_SUPERUSER_EMAIL --tran
 
 The versioned schema is in `pb_migrations/202607191000_create_member_account_links.js`.
 
+## Personal calendar exports
+
+Event calendar export status is stored in the account-owned `calendar_event_exports` collection
+instead of unscoped browser `localStorage`. Apple/Outlook `.ics` and Google Calendar exports can
+therefore show a consistent status across the member's devices without exposing another account's
+activity. A small account-scoped IndexedDB snapshot keeps the last confirmed status readable during
+a short outage and is deleted on logout.
+
+The backend accepts only currently published Event announcements, enforces one row per account and
+event, and records the exact announcement version exported. If leadership later changes the event,
+the UI says “Update calendar export” instead of presenting the old export as current. ChurchConnect
+records that an export was prepared; it does not claim that Apple, Google, or Outlook completed the
+final calendar import.
+
+To reconcile announcements and calendar exports and run disposable ownership, visibility,
+version, uniqueness, immutability, deletion, and anonymous-access tests:
+
+```bash
+npm run backend:bootstrap-announcements -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+The calendar schema is in `pb_migrations/202607191200_create_calendar_event_exports.js`.
+
 ## Cell meetings, attendance, visitors, and reports
 
 Fellowship operations are local-first: leaders can start a meeting, take attendance, add visitors,
