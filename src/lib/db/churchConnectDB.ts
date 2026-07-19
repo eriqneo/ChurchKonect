@@ -193,6 +193,7 @@ export interface TrainingCertificateRecord extends LocalFirstRecord {
   attendanceRate?: number;
   requestedBy?: string;
   verifiedById?: string;
+  verifiedByRole?: string;
   verifiedAt?: string;
 }
 

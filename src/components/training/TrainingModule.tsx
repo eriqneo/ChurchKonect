@@ -18,7 +18,7 @@ import {
   ProgressRing
 } from '../shared';
 import { useToast } from '../shared/toast/useToast';
-import { isRoleSimulatorEnabled } from '../../lib/auth/roles';
+import { APP_ROLES, isRoleSimulatorEnabled } from '../../lib/auth/roles';
 import { 
   Check, 
   Plus, 
@@ -187,6 +187,10 @@ interface ExtendedCertificate extends TrainingCertificateRecord {
   attendanceRate?: number;
 }
 
+function certificateRoleLabel(role?: string): string {
+  return APP_ROLES.find((item) => item.id === role)?.label || 'Authorized Church Leader';
+}
+
 export function TrainingModule({ currentRole: passedRole }: { currentRole?: any } = {}) {
   const toast = useToast();
   const { user: currentUser, role: userRole } = useCurrentUser();
@@ -210,7 +214,8 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
     checkIn,
     setSessionOccurred,
     issueCertificate,
-    verifyCertificate
+    verifyCertificate,
+    getVerifiedCertificate
   } = useTrainingData();
   const currentMember = members.find((member) => member.userId === currentUser?.localId);
   const currentMemberId = currentMember?.localId || '';
@@ -691,11 +696,16 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
     }
   };
 
-  // Canvas Certificate Drawing & Download Function
-  const handleDownloadCertificate = (courseTitle: string, studentName: string, rate: number, dateStr: string) => {
-    toast.info('Preparing secure download for completion certificate...');
-    
-    setTimeout(() => {
+  // Revalidate the server authority before rendering a certificate document.
+  const handleDownloadCertificate = async (certificate: ExtendedCertificate, courseTitle: string, studentName: string) => {
+    toast.info('Confirming certificate authority with PocketBase…');
+    try {
+      const confirmed = await getVerifiedCertificate(certificate.remoteId || certificate.localId);
+      const attendanceRate = confirmed.attendanceRate ?? 0;
+      const issuedDate = new Date(confirmed.issuedAt).toLocaleDateString();
+      const verifiedDate = confirmed.verifiedAt ? new Date(confirmed.verifiedAt).toLocaleDateString() : issuedDate;
+      const verifierName = confirmed.verifiedBy || 'Authorized Church Leader';
+      const verifierRole = certificateRoleLabel(confirmed.verifiedByRole);
       const canvas = document.createElement('canvas');
       canvas.width = 1200;
       canvas.height = 850;
@@ -767,11 +777,10 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       // Stats and verification details
       ctx.fillStyle = '#6B7280';
       ctx.font = 'italic 16px sans-serif';
-      ctx.fillText(`Achieved with an exemplary attendance rating of ${rate}% — Issued on ${dateStr}`, 600, 610);
+      ctx.fillText(`Completed with ${attendanceRate}% recorded attendance — Issued on ${issuedDate}`, 600, 610);
 
-      const certId = 'CC-CERT-2026-' + Math.floor(1000 + Math.random() * 9000);
       ctx.font = '14px monospace';
-      ctx.fillText(`Authenticity Code: ${certId}`, 600, 645);
+      ctx.fillText(`PocketBase verification record: ${confirmed.certificateNumber}`, 600, 645);
 
       // Divider
       ctx.strokeStyle = '#D4A84A';
@@ -781,44 +790,31 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       ctx.lineTo(850, 680);
       ctx.stroke();
 
-      // Signature line 1
+      // Server-confirmed verification authority
       ctx.fillStyle = '#111827';
       ctx.font = 'bold italic 22px Georgia, serif';
-      ctx.fillText('Pastor David', 450, 720); // Hand signed look
+      ctx.fillText(verifierName, 450, 720);
       ctx.fillStyle = '#4B5563';
       ctx.font = '13px sans-serif';
-      ctx.fillText('Pastor David, Lead Pastor', 450, 745);
+      ctx.fillText(`${verifierRole} • Verified ${verifiedDate}`, 450, 755);
       ctx.strokeStyle = '#D1D5DB';
       ctx.beginPath();
-      ctx.moveTo(330, 728);
-      ctx.lineTo(570, 728);
+      ctx.moveTo(320, 735);
+      ctx.lineTo(580, 735);
       ctx.stroke();
 
-      // Signature line 2
-      ctx.fillStyle = '#111827';
-      ctx.font = 'bold italic 22px Georgia, serif';
-      ctx.fillText('Dean Sarah Jenkins', 750, 720); // Hand signed look
-      ctx.fillStyle = '#4B5563';
-      ctx.font = '13px sans-serif';
-      ctx.fillText('Sarah Jenkins, Academic Dean', 750, 745);
-      ctx.strokeStyle = '#D1D5DB';
-      ctx.beginPath();
-      ctx.moveTo(630, 728);
-      ctx.lineTo(870, 728);
-      ctx.stroke();
-
-      // Beautiful official gold seal
+      // Visual server-verification seal (the record number above is authoritative)
       ctx.fillStyle = 'rgba(212, 168, 74, 0.12)';
       ctx.beginPath();
-      ctx.arc(600, 725, 48, 0, Math.PI * 2);
+      ctx.arc(820, 725, 48, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#D4A84A';
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.fillStyle = '#D4A84A';
       ctx.font = 'bold 11px Georgia, serif';
-      ctx.fillText('CC SEAL', 600, 720);
-      ctx.fillText('★ 2026 ★', 600, 738);
+      ctx.fillText('SERVER', 820, 720);
+      ctx.fillText('✓ VERIFIED', 820, 738);
 
       const link = document.createElement('a');
       link.download = `Certificate_${studentName.replace(/\s+/g, '_')}_${courseTitle.replace(/\s+/g, '_')}.png`;
@@ -827,8 +823,10 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
       link.click();
       document.body.removeChild(link);
 
-      toast.success('Certificate downloaded successfully!');
-    }, 1200);
+      toast.success('Server-verified certificate downloaded.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'The certificate could not be verified for download.');
+    }
   };
 
   // Compute stats for selected course
@@ -1539,10 +1537,9 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                                   ) : certInfo.status === 'verified' ? (
                                     <button
                                       onClick={() => handleDownloadCertificate(
+                                        certInfo,
                                         courses.find(c => c.localId === selectedCourseId)?.title || 'Academy Course',
-                                        mInfo?.fullName || 'Member',
-                                        rate,
-                                        new Date(certInfo.issuedAt).toLocaleDateString()
+                                        mInfo?.fullName || 'Member'
                                       )}
                                       className="px-2.5 py-1.5 bg-surface-200 text-text-secondary rounded-pill font-black text-[9px] tracking-wider uppercase cursor-pointer transition-colors flex items-center gap-1 border border-white/5"
                                     >
@@ -1859,10 +1856,9 @@ export function TrainingModule({ currentRole: passedRole }: { currentRole?: any 
                           <span className="text-[9px] font-mono text-text-muted">{cert.certificateNumber}</span>
                           <button
                             onClick={() => handleDownloadCertificate(
+                              cert,
                               courseTitle,
-                              currentUser.name,
-                              100, // Graduated
-                              new Date(cert.issuedAt).toLocaleDateString()
+                              currentMember?.fullName || currentUser?.name || 'Member'
                             )}
                             className="px-2.5 py-1 bg-gold-500/10 hover:bg-gold-500/20 text-gold-500 font-extrabold text-[10px] rounded-full border border-gold-500/25 flex items-center gap-1 cursor-pointer transition-colors"
                           >

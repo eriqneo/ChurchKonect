@@ -182,6 +182,17 @@ Only Administrators and the Lead Pastor manage courses and rosters. Certificate 
 by an Administrator remain pending until the Lead Pastor verifies them; members can read only
 their own enrollments, attendance, and certificates.
 
+Certificate authority is server-enforced. Administrators can create only pending requests under
+their own identity. Verification can change a pending record exactly once, must be performed by
+the authenticated Lead Pastor, and cannot alter the certificate number, student, course,
+attendance rate, issue date, or requester. The verifier display name and role are immutable copies
+validated against that authenticated account, so members do not need permission to inspect
+another user's auth record.
+
+Before downloading a certificate, the app revalidates its status with PocketBase. The document
+uses the confirmed certificate number, attendance rate, issue/verification dates, and verifier;
+it never generates a random authenticity code or sample signatory.
+
 To reconcile and live-test the Academy schema:
 
 ```bash
@@ -190,7 +201,8 @@ npm run backend:bootstrap-training -- --email=YOUR_SUPERUSER_EMAIL
 
 The command uses disposable users and removes all test data. Add `--transport=curl` only when the
 local Node network path cannot reach PocketHost. The versioned schema is in
-`pb_migrations/202607171930_create_training_academy.js`.
+`pb_migrations/202607171930_create_training_academy.js`, with certificate authority hardening in
+`pb_migrations/202607190600_harden_training_certificates.js`.
 
 ## Announcements and timeline
 

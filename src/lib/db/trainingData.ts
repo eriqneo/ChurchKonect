@@ -23,6 +23,11 @@ function displayName(record: RecordModel, key: string): string {
   return expanded && !Array.isArray(expanded) && typeof expanded.name === 'string' ? expanded.name : '';
 }
 
+function displayRole(record: RecordModel, key: string): string {
+  const expanded = record.expand?.[key];
+  return expanded && !Array.isArray(expanded) && typeof expanded.role === 'string' ? expanded.role : '';
+}
+
 function mapTraining(record: RecordModel, ownerId: string): TrainingRecord {
   return {
     localId: record.id, remoteId: record.id, code: record.code, title: record.title,
@@ -71,7 +76,8 @@ function mapCertificate(record: RecordModel, ownerId: string): TrainingCertifica
     certificateNumber: record.certificateNumber, status: record.status,
     attendanceRate: Number(record.attendanceRate || 0), issuedAt: record.issuedAt,
     requestedBy: record.requestedBy, verifiedById: record.verifiedBy || undefined,
-    verifiedBy: displayName(record, 'verifiedBy') || record.verifiedBy || '',
+    verifiedBy: record.verifierName || displayName(record, 'verifiedBy') || record.verifiedBy || '',
+    verifiedByRole: record.verifierRole || displayRole(record, 'verifiedBy') || undefined,
     verifiedAt: record.verifiedAt || undefined, syncStatus: 'synced',
     createdAt: record.created, updatedAt: record.updated, cacheOwnerId: ownerId
   };
@@ -372,8 +378,9 @@ export function useTrainingData() {
       id, training: trainingId, member: memberId,
       certificateNumber: `CC-CERT-${new Date().getFullYear()}-${id.slice(-8).toUpperCase()}`,
       status: verified ? 'verified' : 'pending', attendanceRate, issuedAt: now,
-      requestedBy: user.id, verifiedBy: verified ? user.id : '', verifiedAt: verified ? now : ''
-    });
+      requestedBy: user.id, verifiedBy: verified ? user.id : '', verifiedAt: verified ? now : '',
+      verifierName: verified ? user.name : '', verifierRole: verified ? user.role : ''
+    }, { expand: 'verifiedBy' });
     await recordAuditEvent(pb, user, {
       action: 'academy_certificate_issued', summary: `Issued an Academy certificate request${verified ? ' and verified it' : ''}.`, entityType: 'training_certificate', entityId: record.id
     });
@@ -386,12 +393,32 @@ export function useTrainingData() {
     if (!user) throw new Error('Sign in to verify Academy certificates.');
     requireConnection();
     const now = new Date().toISOString();
-    const record = await pb.collection('training_certificates').update(certificateId, { status: 'verified', verifiedBy: user.id, verifiedAt: now }, { expand: 'verifiedBy' });
+    const record = await pb.collection('training_certificates').update(certificateId, {
+      status: 'verified', verifiedBy: user.id, verifiedAt: now,
+      verifierName: user.name, verifierRole: user.role
+    }, { expand: 'verifiedBy' });
     await recordAuditEvent(pb, user, {
       action: 'academy_certificate_verified', summary: 'Verified an Academy certificate.', entityType: 'training_certificate', entityId: certificateId
     });
     await cacheConfirmed(db.trainingCertificates, mapCertificate(record, user.id));
     await refreshTrainingData(pb, user.id).catch(() => undefined);
+  }, [pb, user]);
+
+  const getVerifiedCertificate = useCallback(async (certificateId: string) => {
+    if (!user) throw new Error('Sign in to validate Academy certificates.');
+    requireConnection();
+    let record: RecordModel;
+    try {
+      record = await pb.collection('training_certificates').getOne(certificateId, { expand: 'verifiedBy' });
+    } catch (error) {
+      throw new Error(messageFor(error));
+    }
+    if (record.status !== 'verified' || !record.verifiedBy || !record.verifiedAt || !record.certificateNumber || !record.verifierName || !record.verifierRole) {
+      throw new Error('This certificate is not currently verified by the Lead Pastor.');
+    }
+    const confirmed = mapCertificate(record, user.id);
+    await cacheConfirmed(db.trainingCertificates, confirmed);
+    return confirmed;
   }, [pb, user]);
 
   const rows = outboxRows || [];
@@ -402,6 +429,7 @@ export function useTrainingData() {
     isRefreshing, pendingCount: rows.filter((item) => item.status !== 'failed').length,
     failedCount: rows.filter((item) => item.status === 'failed').length,
     error: rows.find((item) => item.status === 'failed')?.lastError || error,
-    refresh, saveCourse, enrollMember, checkIn, setSessionOccurred, issueCertificate, verifyCertificate
+    refresh, saveCourse, enrollMember, checkIn, setSessionOccurred, issueCertificate, verifyCertificate,
+    getVerifiedCertificate
   };
 }

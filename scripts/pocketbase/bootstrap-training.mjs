@@ -125,6 +125,20 @@ async function removeStaleTests(pb) {
   if (coursePage.items.length || users.items.length) console.log('✓ Removed stale disposable Academy test data');
 }
 
+async function backfillCertificateAuthorities(pb) {
+  const certificates = await pb.collection('training_certificates').getFullList({
+    filter: 'status = "verified" && verifiedBy != "" && (verifierName = "" || verifierRole = "")'
+  });
+  for (const certificate of certificates) {
+    const verifier = await pb.collection('users').getOne(certificate.verifiedBy);
+    await pb.collection('training_certificates').update(certificate.id, {
+      verifierName: verifier.name,
+      verifierRole: verifier.role
+    });
+  }
+  if (certificates.length) console.log(`✓ Backfilled authority identity on ${certificates.length} verified certificate${certificates.length === 1 ? '' : 's'}`);
+}
+
 async function main() {
   const url = argument('url', 'https://churchconnect.pockethost.io').replace(/\/$/, '');
   const email = argument('email');
@@ -215,8 +229,8 @@ async function main() {
     type: 'base', name: 'training_certificates',
     listRule: `${AUTHENTICATED} && (${MANAGER} || member.user = @request.auth.id)`,
     viewRule: `${AUTHENTICATED} && (${MANAGER} || member.user = @request.auth.id)`,
-    createRule: `${AUTHENTICATED} && (@request.auth.role = "lead_pastor" || (@request.auth.role = "administrator" && status = "pending" && verifiedBy = ""))`,
-    updateRule: `${AUTHENTICATED} && @request.auth.role = "lead_pastor" && @request.body.training:changed = false && @request.body.member:changed = false && @request.body.certificateNumber:changed = false && @request.body.requestedBy:changed = false`, deleteRule: null,
+    createRule: `${AUTHENTICATED} && requestedBy = @request.auth.id && ((@request.auth.role = "administrator" && status = "pending" && verifiedBy = "" && verifiedAt = "" && verifierName = "" && verifierRole = "") || (@request.auth.role = "lead_pastor" && status = "verified" && verifiedBy = @request.auth.id && verifiedAt != "" && verifierName = @request.auth.name && verifierRole = @request.auth.role))`,
+    updateRule: `${AUTHENTICATED} && @request.auth.role = "lead_pastor" && status = "pending" && verifiedBy = "" && @request.body.status = "verified" && @request.body.verifiedBy = @request.auth.id && @request.body.verifiedAt != "" && @request.body.verifierName = @request.auth.name && @request.body.verifierRole = @request.auth.role && @request.body.training:changed = false && @request.body.member:changed = false && @request.body.certificateNumber:changed = false && @request.body.attendanceRate:changed = false && @request.body.issuedAt:changed = false && @request.body.requestedBy:changed = false`, deleteRule: null,
     fields: [
       { name: 'training', type: 'relation', required: true, collectionId: trainings.id, maxSelect: 1, cascadeDelete: false },
       { name: 'member', type: 'relation', required: true, collectionId: members.id, maxSelect: 1, cascadeDelete: false },
@@ -226,7 +240,9 @@ async function main() {
       { name: 'issuedAt', type: 'date', required: true },
       { name: 'requestedBy', type: 'relation', required: true, collectionId: users.id, maxSelect: 1, cascadeDelete: false },
       { name: 'verifiedBy', type: 'relation', collectionId: users.id, maxSelect: 1, cascadeDelete: false },
-      { name: 'verifiedAt', type: 'date' }
+      { name: 'verifiedAt', type: 'date' },
+      { name: 'verifierName', type: 'text', max: 120 },
+      { name: 'verifierRole', type: 'text', max: 40 }
     ],
     indexes: [
       'CREATE UNIQUE INDEX idx_training_certificates_unique ON training_certificates (training, member)',
@@ -234,6 +250,8 @@ async function main() {
       'CREATE INDEX idx_training_certificates_status ON training_certificates (status, issuedAt)'
     ]
   });
+
+  await backfillCertificateAuthorities(superuser);
 
   await removeStaleTests(superuser);
 
@@ -342,20 +360,48 @@ async function main() {
       status: 'verified', attendanceRate: 100, issuedAt: now,
       requestedBy: userRecords.admin.id, verifiedBy: userRecords.admin.id, verifiedAt: now
     }));
+    await expectRejected('Administrator cannot impersonate another certificate requester', () => appAdmin.collection('training_certificates').create({
+      training: course.id, member: profiles.other.id, certificateNumber: `CC-CERT-SPOOF-${suffix}`,
+      status: 'pending', attendanceRate: 100, issuedAt: now,
+      requestedBy: userRecords.lead.id, verifiedBy: '', verifiedAt: '', verifierName: '', verifierRole: ''
+    }));
     const certificate = await appAdmin.collection('training_certificates').create({
       id: recordId(), training: course.id, member: profiles.member.id,
       certificateNumber: `CC-CERT-TEST-${suffix}`, status: 'pending', attendanceRate: 100,
-      issuedAt: now, requestedBy: userRecords.admin.id, verifiedBy: ''
+      issuedAt: now, requestedBy: userRecords.admin.id, verifiedBy: '', verifierName: '', verifierRole: ''
     });
     created.training_certificates.push(certificate.id);
     await expectRejected('Administrator cannot self-verify a pastoral certificate', () => appAdmin.collection('training_certificates').update(certificate.id, {
       status: 'verified', verifiedBy: userRecords.admin.id, verifiedAt: now
     }));
     const appLead = new PocketBase(url); await appLead.collection('users').authWithPassword(credentials.lead.email, credentials.lead.password);
-    await appLead.collection('training_certificates').update(certificate.id, { status: 'verified', verifiedBy: userRecords.lead.id, verifiedAt: now });
+    await expectRejected('Lead Pastor cannot attribute verification to another account', () => appLead.collection('training_certificates').update(certificate.id, {
+      status: 'verified', verifiedBy: userRecords.admin.id, verifiedAt: now,
+      verifierName: userRecords.lead.name, verifierRole: userRecords.lead.role
+    }));
+    await expectRejected('Lead Pastor cannot spoof the verifier display name', () => appLead.collection('training_certificates').update(certificate.id, {
+      status: 'verified', verifiedBy: userRecords.lead.id, verifiedAt: now,
+      verifierName: 'Different Pastor', verifierRole: userRecords.lead.role
+    }));
+    await appLead.collection('training_certificates').update(certificate.id, {
+      status: 'verified', verifiedBy: userRecords.lead.id, verifiedAt: now,
+      verifierName: userRecords.lead.name, verifierRole: userRecords.lead.role
+    });
     await expectRejected('Verified certificate identity cannot be reassigned', () => appLead.collection('training_certificates').update(certificate.id, { member: profiles.other.id }));
+    await expectRejected('Verified certificate authority fields are immutable', () => appLead.collection('training_certificates').update(certificate.id, { attendanceRate: 80 }));
     const ownCertificate = await appMember.collection('training_certificates').getOne(certificate.id);
     if (ownCertificate.status !== 'verified') throw new Error('Member could not read their verified certificate.');
+    if (ownCertificate.verifiedBy !== userRecords.lead.id || ownCertificate.verifierName !== userRecords.lead.name || ownCertificate.verifierRole !== 'lead_pastor') throw new Error('Certificate verifier identity was not server-confirmed.');
+    const directCertificate = await appLead.collection('training_certificates').create({
+      id: recordId(), training: course.id, member: profiles.other.id,
+      certificateNumber: `CC-CERT-DIRECT-${suffix}`, status: 'verified', attendanceRate: 100,
+      issuedAt: now, requestedBy: userRecords.lead.id, verifiedBy: userRecords.lead.id, verifiedAt: now,
+      verifierName: userRecords.lead.name, verifierRole: userRecords.lead.role
+    });
+    created.training_certificates.push(directCertificate.id);
+    const directOwnCertificate = await appOther.collection('training_certificates').getOne(directCertificate.id);
+    if (directOwnCertificate.verifierName !== userRecords.lead.name) throw new Error('Direct Lead Pastor issuance lost its authority identity.');
+    console.log('✓ Lead Pastor direct issuance remains server-attributed and owner-readable');
     console.log('✓ Lead Pastor verification and member certificate visibility are enforced');
     await expectRejected('Client hard-delete is disabled', () => appAdmin.collection('trainings').delete(course.id));
   } finally {

@@ -52,6 +52,7 @@ editing across many devices.
 | Identity | PocketBase auth is the production identity and role source | Reconciled |
 | Saints Directory | Paginated privacy-safe view with scoped cache and server aggregate counts | Connected without exposing registry PII |
 | Mobile Home | Lightweight private aggregate row plus published event dates with an account-scoped snapshot | Connected; sample activity and metrics retired |
+| Certificate authority | Immutable Lead Pastor verification identity and live download revalidation | Connected; random codes and sample signatories retired |
 | PocketBase hooks | Production collections, views, rules, and live bootstrap tests are versioned | Active |
 | Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
