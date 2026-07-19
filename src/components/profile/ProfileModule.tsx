@@ -8,6 +8,7 @@ import { useAuth } from '../../lib/db/PocketBaseProvider';
 import { useGovernanceData, type FeedbackStatus, type FeedbackType } from '../../lib/db/governanceData';
 import { usePocketBaseMembers } from '../../lib/db/pocketbaseHooks';
 import { useOperationalSync } from '../../lib/db/syncData';
+import { useProfilePreferences } from '../../lib/db/profilePreferencesData';
 import { useTheme } from '../../lib/theme/ThemeProvider';
 import * as Typography from '../../lib/theme/typography';
 import { 
@@ -71,6 +72,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const governance = useGovernanceData();
   const { members: registryMembers, updateMember } = usePocketBaseMembers();
   const { pendingCount: pendingSyncCount, failedCount: failedSyncCount } = useOperationalSync();
+  const profilePreferences = useProfilePreferences();
   
   // Get active system user & role
   const { role: userRole } = useCurrentUser();
@@ -104,8 +106,7 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   const [reviewResponses, setReviewResponses] = useState<Record<string, string>>({});
   const [reviewingFeedbackId, setReviewingFeedbackId] = useState<string | null>(null);
 
-  // Preference toggles
-  const [privacyOn, setPrivacyOn] = useState(true);
+  const privacyOn = profilePreferences.directoryVisibility === 'private';
 
   // Temp edit form states
   const [tempName, setTempName] = useState('');
@@ -234,6 +235,18 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
   // PWA Install Prompt simulation
   const handleInstallApp = () => {
     toast.success('PWA Install Triggered: Choose Add to Home Screen in your browser!');
+  };
+
+  const handlePrivacyToggle = async () => {
+    const nextVisibility = privacyOn ? 'listed' : 'private';
+    try {
+      await profilePreferences.setDirectoryVisibility(nextVisibility);
+      toast.success(nextVisibility === 'private'
+        ? 'Your profile was removed from the Saints Directory.'
+        : 'Your profile is now listed in the Saints Directory.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Your directory visibility could not be changed.');
+    }
   };
 
   const handleSubmitFeedback = async () => {
@@ -578,16 +591,16 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
                 <SettingsRow
                   icon={<Shield className="w-4.5 h-4.5 text-white" />}
                   iconColor="bg-cathedral-500"
-                  label="Privacy"
+                  label="Hide from Saints Directory"
                   trailing={
                     <button
-                      onClick={() => {
-                        setPrivacyOn(!privacyOn);
-                        toast.success(privacyOn ? 'Private profile disabled' : 'Profile is now private.');
-                      }}
+                      onClick={() => void handlePrivacyToggle()}
+                      disabled={profilePreferences.isLoading || profilePreferences.isSaving}
+                      aria-pressed={privacyOn}
+                      aria-label="Hide profile from Saints Directory"
                       className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none p-0.5 cursor-pointer ${
                         privacyOn ? 'bg-gold-500' : 'bg-surface-300'
-                      }`}
+                      } disabled:cursor-wait disabled:opacity-60`}
                     >
                       <motion.div
                         animate={{ x: privacyOn ? 24 : 0 }}
@@ -597,6 +610,11 @@ export function ProfileModule({ currentRole: passedRole, setActiveTab }: Profile
                     </button>
                   }
                 />
+                {profilePreferences.error && (
+                  <p className="px-4 pb-3 text-[10px] leading-relaxed text-cathedral-500 dark:text-cathedral-300" role="status">
+                    {profilePreferences.error}
+                  </p>
+                )}
 
               </GlassCard>
             </div>

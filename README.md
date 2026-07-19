@@ -142,6 +142,14 @@ Cell Leader's assigned fellowship roster, or a District Pastor's assigned sectio
 update their linked name and phone, but cannot change email, role, ministry placement, QR identity,
 status, or ownership. Login email changes require a separate verified account workflow.
 
+The Profile “Hide from Saints Directory” switch is backed by an account-owned `user_preferences`
+record. PocketBase removes private profiles from new directory queries, while authorized registry,
+fellowship, attendance, and pastoral workflows retain their existing scoped access. Another online
+device refreshes its privacy-safe directory cache on visibility changes and at least once per
+minute; an offline device can retain its last confirmed non-sensitive directory snapshot until it
+reconnects. Preference changes themselves require server acknowledgement and are never presented
+as saved while offline.
+
 To reconcile the privacy views and run disposable leakage, ownership, roster-scope, aggregate,
 inactive-record, and anonymous-access tests:
 
@@ -149,7 +157,8 @@ inactive-record, and anonymous-access tests:
 npm run backend:bootstrap-saints-directory -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
 ```
 
-The versioned schema is in `pb_migrations/202607190230_create_saints_directory.js`.
+The versioned schemas are in `pb_migrations/202607190230_create_saints_directory.js` and
+`pb_migrations/202607190800_create_user_preferences.js`.
 
 ## Cell meetings, attendance, visitors, and reports
 

@@ -23,7 +23,8 @@ const DIRECTORY_QUERY = `
   FROM members m
   LEFT JOIN cell_groups cg ON cg.id = m.cellGroup
   LEFT JOIN sections s ON s.id = m.section
-  WHERE m.status = 'active' AND m.deleted = 0
+  LEFT JOIN user_preferences up ON up.user = m.user
+  WHERE m.status = 'active' AND m.deleted = 0 AND COALESCE(up.directoryVisibility, 'listed') = 'listed'
 `;
 
 const CELL_COUNT_QUERY = `
@@ -113,6 +114,26 @@ async function reconcileView(pb, name, viewQuery) {
   return saved;
 }
 
+function mergeFields(existingFields, desiredFields) {
+  const desired = new Map(desiredFields.map((field) => [field.name, field]));
+  const merged = existingFields.map((field) => {
+    const next = desired.get(field.name);
+    if (!next) return field;
+    desired.delete(field.name);
+    return { ...field, ...next, id: field.id };
+  });
+  return [...merged, ...desired.values()];
+}
+
+async function reconcileCollection(pb, definition) {
+  let existing;
+  try { existing = await pb.collections.getOne(definition.name); } catch (error) { if (error?.status !== 404) throw error; }
+  const payload = existing ? { ...definition, fields: mergeFields(existing.fields ?? [], definition.fields) } : definition;
+  const saved = existing ? await pb.collections.update(existing.id, payload) : await pb.collections.create(payload);
+  console.log(`✓ ${definition.name} schema and ownership rules reconciled`);
+  return saved;
+}
+
 async function expectRejected(label, operation) {
   try { await operation(); } catch { console.log(`✓ ${label}`); return; }
   throw new Error(`${label}: expected rejection.`);
@@ -143,6 +164,7 @@ async function main() {
   await superuser.collection('_superusers').authWithPassword(email, password);
   console.log('✓ Superuser authentication');
   const members = await superuser.collections.getOne('members');
+  const users = await superuser.collections.getOne('users');
   await superuser.collections.update(members.id, {
     listRule: `${AUTHENTICATED} && (${LEADERSHIP} || (deleted = false && status = "active" && ${SCOPED_READER}))`,
     viewRule: `${AUTHENTICATED} && (${LEADERSHIP} || (deleted = false && status = "active" && ${SCOPED_READER}))`,
@@ -151,6 +173,19 @@ async function main() {
     deleteRule: null
   });
   console.log('✓ Full member registry access tightened by ownership and ministry scope');
+  await reconcileCollection(superuser, {
+    type: 'base', name: 'user_preferences',
+    listRule: `${AUTHENTICATED} && user = @request.auth.id`,
+    viewRule: `${AUTHENTICATED} && user = @request.auth.id`,
+    createRule: `${AUTHENTICATED} && user = @request.auth.id`,
+    updateRule: `${AUTHENTICATED} && user = @request.auth.id && @request.body.user:changed = false`,
+    deleteRule: null,
+    fields: [
+      { name: 'user', type: 'relation', required: true, collectionId: users.id, maxSelect: 1, cascadeDelete: true },
+      { name: 'directoryVisibility', type: 'select', required: true, maxSelect: 1, values: ['listed', 'private'] }
+    ],
+    indexes: ['CREATE UNIQUE INDEX idx_user_preferences_user ON user_preferences (user)']
+  });
   await reconcileView(superuser, 'saints_directory', DIRECTORY_QUERY);
   await reconcileView(superuser, 'saints_directory_cell_counts', CELL_COUNT_QUERY);
   await reconcileView(superuser, 'saints_directory_department_counts', DEPARTMENT_COUNT_QUERY);
@@ -163,7 +198,7 @@ async function main() {
     other: { role: 'member', password: temporaryPassword() },
     leader: { role: 'cell_leader', password: temporaryPassword() }
   };
-  const created = { users: [], members: [], departments: [], sections: [], cell_groups: [] };
+  const created = { users: [], members: [], departments: [], sections: [], cell_groups: [], user_preferences: [] };
   try {
     const records = {}; const clients = {};
     for (const [key, item] of Object.entries(credentials)) {
@@ -219,6 +254,27 @@ async function main() {
     await expectRejected('Member cannot change their registry role', () => clients.member.collection('members').update(profiles.member.id, { role: 'administrator' }));
     console.log('✓ Members can maintain linked profile and login details without changing placement or authority');
 
+    const preference = await clients.member.collection('user_preferences').create({
+      id: recordId(), user: records.member.id, directoryVisibility: 'listed'
+    });
+    created.user_preferences.push(preference.id);
+    await expectRejected('Member cannot create preferences for another account', () => clients.member.collection('user_preferences').create({
+      user: records.other.id, directoryVisibility: 'private'
+    }));
+    await expectRejected('Member cannot read another account preferences', () => clients.other.collection('user_preferences').getOne(preference.id));
+    await clients.member.collection('user_preferences').update(preference.id, { directoryVisibility: 'private' });
+    if ((await clients.other.collection('saints_directory').getList(1, 20, { filter: `id = "${profiles.member.id}"` })).totalItems !== 0) {
+      throw new Error('Private member remained in the Saints Directory projection.');
+    }
+    if (!(await clients.admin.collection('members').getOne(profiles.member.id))) throw new Error('Directory privacy incorrectly blocked authorized registry operations.');
+    await expectRejected('Preference ownership cannot be reassigned', () => clients.member.collection('user_preferences').update(preference.id, { user: records.other.id }));
+    await expectRejected('Client hard-delete of preferences is disabled', () => clients.member.collection('user_preferences').delete(preference.id));
+    await clients.member.collection('user_preferences').update(preference.id, { directoryVisibility: 'listed' });
+    if ((await clients.other.collection('saints_directory').getList(1, 20, { filter: `id = "${profiles.member.id}"` })).totalItems !== 1) {
+      throw new Error('Relisted member did not return to the Saints Directory projection.');
+    }
+    console.log('✓ Account-owned privacy preference hides directory listing without blocking authorized registry work');
+
     const leaderRoster = await clients.leader.collection('members').getList(1, 20);
     if (!leaderRoster.items.some((item) => item.id === profiles.member.id) || leaderRoster.items.some((item) => item.id === profiles.other.id)) {
       throw new Error('Cell leader roster scope failed.');
@@ -242,7 +298,7 @@ async function main() {
     if ((await clients.member.collection('saints_directory').getList(1, 10, { filter: `id = "${profiles.other.id}"` })).totalItems !== 0) throw new Error('Inactive profile remained in directory.');
     console.log('✓ Anonymous access, client writes, and inactive directory rows are blocked');
   } finally {
-    for (const collection of ['members', 'cell_groups', 'sections', 'departments', 'users']) {
+    for (const collection of ['user_preferences', 'members', 'cell_groups', 'sections', 'departments', 'users']) {
       for (const id of created[collection].reverse()) {
         try { await superuser.collection(collection).delete(id); } catch { /* removed */ }
       }

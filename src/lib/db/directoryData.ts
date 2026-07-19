@@ -8,6 +8,7 @@ import {
   type DirectoryMemberRecord
 } from './churchConnectDB';
 import { useAuth } from './PocketBaseProvider';
+import { DIRECTORY_VISIBILITY_CHANGED_EVENT } from './profilePreferencesData';
 
 const PAGE_SIZE = 100;
 
@@ -146,11 +147,16 @@ export function useSaintsDirectoryData() {
     if (!ownerId) return;
     const onOnline = () => void refresh();
     const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    const onVisibilityChanged = () => void refresh();
     window.addEventListener('online', onOnline);
+    window.addEventListener(DIRECTORY_VISIBILITY_CHANGED_EVENT, onVisibilityChanged);
     document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 60_000);
     return () => {
       window.removeEventListener('online', onOnline);
+      window.removeEventListener(DIRECTORY_VISIBILITY_CHANGED_EVENT, onVisibilityChanged);
       document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
     };
   }, [ownerId, refresh]);
 
