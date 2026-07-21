@@ -94,7 +94,7 @@ async function fetchSnapshot(pb: PocketBase, ownerId: string): Promise<PrayerSna
   const [requestPage, assignmentPage, notePage, watchPage, outcomePage] = await Promise.all([
     pb.collection('prayer_requests').getList(1, 200, { sort: '-submittedAt' }),
     pb.collection('prayer_assignments').getList(1, 200, { sort: '-assignedAt' }),
-    pb.collection('prayer_notes').getList(1, 200, { sort: '-created' }),
+    pb.collection('prayer_notes').getList(1, 200),
     pb.collection('prayer_watch_events').getList(1, 200, { sort: '-offeredAt' }),
     pb.collection('prayer_outcomes').getList(1, 200, { sort: '-reportedAt' })
   ]);
@@ -107,7 +107,10 @@ async function fetchSnapshot(pb: PocketBase, ownerId: string): Promise<PrayerSna
     assignmentsByRequest.set(assignment.request, list);
   }
   const notesByRequest = new Map<string, PrayerNoteView[]>();
-  for (const note of notePage.items) {
+  const sortedNotes = [...notePage.items].sort((a, b) =>
+    new Date(String(b.created || '')).getTime() - new Date(String(a.created || '')).getTime()
+  );
+  for (const note of sortedNotes) {
     const list = notesByRequest.get(note.request) || [];
     list.push({ id: note.id, text: note.text, timestamp: displayTimestamp(note.created), authorName: note.authorName });
     notesByRequest.set(note.request, list);
