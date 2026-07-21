@@ -183,6 +183,35 @@ npm run backend:bootstrap-account-linking -- --email=YOUR_SUPERUSER_EMAIL --tran
 
 The versioned schema is in `pb_migrations/202607191000_create_member_account_links.js`.
 
+## Privileged member account provisioning
+
+The first reviewed PocketBase hook is `pb_hooks/010_provision_member_account.pb.js`. It exposes
+`POST /api/churchconnect/provision-member-account` for authenticated Administrators and the Lead
+Pastor. The hook creates an active `users` auth account from an active registry profile, links it
+back to `members.user`, records a server-origin audit event, and returns the temporary password
+once. Administrators cannot provision protected `administrator` or `lead_pastor` accounts; those
+remain Lead Pastor-only.
+
+The browser never receives a superuser credential. In the Registry card, leaders can still link an
+existing compatible login first. If none exists, the provisioning button calls the hook and shows
+the temporary password only in the current sheet state.
+
+Before deploying hooks:
+
+```bash
+npm run backend:check-hooks
+npm run backend:bootstrap-governance -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+After deploying `pb_hooks/` to PocketHost, run the disposable live hook smoke test:
+
+```bash
+npm run backend:smoke-provisioning -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+Hook deployment requires PocketHost instance file access such as `phio`/SFTP; PocketBase
+superuser credentials alone are not enough to upload server hook files.
+
 ## Personal calendar exports
 
 Event calendar export status is stored in the account-owned `calendar_event_exports` collection

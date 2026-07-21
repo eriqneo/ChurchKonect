@@ -54,7 +54,7 @@ editing across many devices.
 | Mobile Home | Lightweight private aggregate row plus published event dates with an account-scoped snapshot | Connected; sample activity and metrics retired |
 | Certificate authority | Immutable Lead Pastor verification identity and live download revalidation | Connected; random codes and sample signatories retired |
 | Profile privacy | Account-owned visibility preference enforced by the Saints projection | Connected; acknowledged online changes with scoped local snapshot |
-| PocketBase hooks | Production collections, views, rules, and live bootstrap tests are versioned | Active |
+| PocketBase hooks | First privileged provisioning hook is versioned with a smoke test | Source prepared; PocketHost hook deploy access pending |
 | Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
 The implementation now follows the selective local-first target below. Production demo seeding and

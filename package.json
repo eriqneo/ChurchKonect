@@ -20,6 +20,8 @@
     "backend:bootstrap-saints-directory": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-saints-directory.mjs",
     "backend:bootstrap-home-dashboard": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-home-dashboard.mjs",
     "backend:bootstrap-account-linking": "node --dns-result-order=ipv4first scripts/pocketbase/bootstrap-account-linking.mjs",
+    "backend:check-hooks": "node scripts/hooks/check-hooks.mjs",
+    "backend:smoke-provisioning": "node --dns-result-order=ipv4first scripts/pocketbase/smoke-provision-member-account.mjs",
     "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name churchkonect",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"

@@ -49,6 +49,15 @@ export interface MemberAccountLink {
   memberName?: string;
 }
 
+export interface ProvisionedMemberAccount {
+  userId: string;
+  memberId: string;
+  email: string;
+  fullName: string;
+  role: string;
+  temporaryPassword: string;
+}
+
 export interface MemberReference {
   id: string;
   name: string;
@@ -712,5 +721,23 @@ export function useMemberAccountLinks() {
     await refreshAccounts();
   }, [pb, refreshAccounts, user]);
 
-  return { accounts, refreshAccounts, linkAccount, unlinkAccount, isLoading, error };
+  const provisionAccount = useCallback(async (member: PocketBaseMember): Promise<ProvisionedMemberAccount> => {
+    if (!user) throw new Error('Authentication is required.');
+    if (!['administrator', 'lead_pastor'].includes(user.role)) {
+      throw new Error('Only Administrators and the Lead Pastor can provision login accounts.');
+    }
+    if (!member.email.trim()) throw new Error('Add an email before provisioning a login account.');
+    if (member.userId) throw new Error('This registry profile is already linked to a login account.');
+    const response = await pb.send('/api/churchconnect/provision-member-account', {
+      method: 'POST',
+      body: { memberId: member.remoteId }
+    }) as { ok?: boolean; account?: ProvisionedMemberAccount; message?: string };
+    if (!response.ok || !response.account) {
+      throw new Error(response.message || 'The login account could not be provisioned.');
+    }
+    await refreshAccounts();
+    return response.account;
+  }, [pb, refreshAccounts, user]);
+
+  return { accounts, refreshAccounts, linkAccount, unlinkAccount, provisionAccount, isLoading, error };
 }

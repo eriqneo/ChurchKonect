@@ -132,7 +132,7 @@ async function main() {
       { name: 'summary', type: 'text', required: true, max: 500 },
       { name: 'entityType', type: 'text', max: 50, pattern: '^[a-z0-9_]*$' },
       { name: 'entityId', type: 'text', max: 80 },
-      { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['client'] },
+      { name: 'source', type: 'select', required: true, maxSelect: 1, values: ['client', 'server'] },
       { name: 'operationId', type: 'text', required: true, min: 15, max: 15, pattern: '^[a-z0-9]+$' },
       { name: 'occurredAt', type: 'autodate', onCreate: true, onUpdate: false }
     ],

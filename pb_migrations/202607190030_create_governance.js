@@ -15,7 +15,7 @@ migrate((app) => {
   audit.fields.add(new TextField({ name: 'summary', required: true, max: 500 }));
   audit.fields.add(new TextField({ name: 'entityType', max: 50, pattern: '^[a-z0-9_]*$' }));
   audit.fields.add(new TextField({ name: 'entityId', max: 80 }));
-  audit.fields.add(new SelectField({ name: 'source', required: true, maxSelect: 1, values: ['client'] }));
+  audit.fields.add(new SelectField({ name: 'source', required: true, maxSelect: 1, values: ['client', 'server'] }));
   audit.fields.add(new TextField({ name: 'operationId', required: true, min: 15, max: 15, pattern: '^[a-z0-9]+$' }));
   audit.fields.add(new AutodateField({ name: 'occurredAt', onCreate: true, onUpdate: false }));
   audit.addIndex('idx_audit_logs_operation', true, 'operationId', '');

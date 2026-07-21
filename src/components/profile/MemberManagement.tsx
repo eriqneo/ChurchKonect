@@ -5,6 +5,7 @@ import {
   useMemberReferences,
   usePocketBaseMembers,
   type MemberAccountLink,
+  type ProvisionedMemberAccount,
   type PocketBaseMember
 } from '../../lib/db/pocketbaseHooks';
 import { useAuth } from '../../lib/db/PocketBaseProvider';
@@ -48,7 +49,7 @@ import {
 
 export function MemberManagement() {
   const { members, updateMember, deleteMember, resetPassword, refreshMembers } = usePocketBaseMembers();
-  const { accounts, refreshAccounts, linkAccount, unlinkAccount, isLoading: accountsLoading, error: accountsError } = useMemberAccountLinks();
+  const { accounts, refreshAccounts, linkAccount, unlinkAccount, provisionAccount, isLoading: accountsLoading, error: accountsError } = useMemberAccountLinks();
   const { departments, cellGroups } = useMemberReferences();
   const { user } = useAuth();
   const toast = useToast();
@@ -75,6 +76,7 @@ export function MemberManagement() {
   const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
   const [accountActionPending, setAccountActionPending] = useState(false);
   const [passwordResetResult, setPasswordResetResult] = useState<{ email: string; fullName: string; delivery: 'email' } | null>(null);
+  const [provisionResult, setProvisionResult] = useState<ProvisionedMemberAccount | null>(null);
 
   // Edit fields temp states
   const [editName, setEditName] = useState('');
@@ -250,6 +252,7 @@ export function MemberManagement() {
   const handleOpenAccountSheet = () => {
     setShowAccountSheet(true);
     setShowUnlinkConfirm(false);
+    setProvisionResult(null);
     void refreshAccounts();
   };
 
@@ -286,6 +289,33 @@ export function MemberManagement() {
     }
   };
 
+  const handleProvisionAccount = async () => {
+    if (!selectedMember) return;
+    setAccountActionPending(true);
+    try {
+      const result = await provisionAccount(selectedMember);
+      setProvisionResult(result);
+      setSelectedMember({ ...selectedMember, userId: result.userId });
+      await refreshMembers();
+      toast.success('Login account provisioned and linked.');
+    } catch (error) {
+      console.error('[Members] Account provisioning failed:', error);
+      toast.error(error instanceof Error ? error.message : 'The login account could not be provisioned.');
+    } finally {
+      setAccountActionPending(false);
+    }
+  };
+
+  const handleCopyTemporaryPassword = async () => {
+    if (!provisionResult?.temporaryPassword) return;
+    try {
+      await navigator.clipboard.writeText(provisionResult.temporaryPassword);
+      toast.success('Temporary password copied.');
+    } catch {
+      toast.error('Copy failed. Select the password manually.');
+    }
+  };
+
   const handleToggleEditDept = (dept: string) => {
     if (editDepartments.includes(dept)) {
       setEditDepartments(editDepartments.filter(d => d !== dept));
@@ -312,6 +342,9 @@ export function MemberManagement() {
       && account.email.trim().toLowerCase() === selectedMember.email.trim().toLowerCase()
       && account.role === selectedMember.role)
     : [];
+  const selectedRole = selectedMember?.role || '';
+  const selectedProtectedRole = selectedRole === 'administrator' || selectedRole === 'lead_pastor';
+  const canProvisionSelected = Boolean(selectedMember?.email && !selectedMember.userId && (!selectedProtectedRole || isPastor));
 
   return (
     <div className="space-y-4 pb-12">
@@ -751,6 +784,24 @@ export function MemberManagement() {
               </div>
             </div>
 
+            {provisionResult && (
+              <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                    <KeyRound className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-extrabold text-text-primary">Temporary password created</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-text-muted">Give this to the member securely. It is shown only once.</p>
+                    <button type="button" onClick={handleCopyTemporaryPassword} className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-emerald-500/20 bg-surface-100 px-3 text-left">
+                      <span className="min-w-0 truncate font-mono text-xs font-bold text-text-primary">{provisionResult.temporaryPassword}</span>
+                      <span className="shrink-0 rounded-full bg-emerald-600 px-3 py-1.5 text-[10px] font-extrabold text-white">Copy</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {selectedMember.userId ? (
               <div className="space-y-3">
                 <GlassCard className="space-y-2 p-4 text-xs">
@@ -795,7 +846,23 @@ export function MemberManagement() {
                   <div className="rounded-2xl border border-border-subtle bg-surface-100 p-4 text-center">
                     <Lock className="mx-auto h-6 w-6 text-text-muted" />
                     <h4 className="mt-2 text-xs font-extrabold text-text-primary">No matching login account</h4>
-                    <p className="mt-1 text-[11px] leading-relaxed text-text-muted">A server administrator must first provision an active account for <strong>{selectedMember.email}</strong> with the <strong className="capitalize">{selectedMember.role.replaceAll('_', ' ')}</strong> role.</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+                      Provision an active account for <strong>{selectedMember.email}</strong> with the <strong className="capitalize">{selectedMember.role.replaceAll('_', ' ')}</strong> role, then give the temporary password securely.
+                    </p>
+                    {!canProvisionSelected && (
+                      <p className="mt-2 rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] font-bold text-amber-700 dark:text-amber-300">
+                        {selectedProtectedRole ? 'Only the Lead Pastor can provision protected leadership accounts.' : 'Add a valid email before provisioning login access.'}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleProvisionAccount}
+                      disabled={!canProvisionSelected || accountActionPending}
+                      className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-pill bg-gold-500 px-4 text-xs font-extrabold text-black disabled:opacity-50"
+                    >
+                      {accountActionPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      Provision login account
+                    </button>
                   </div>
                 )}
               </div>
