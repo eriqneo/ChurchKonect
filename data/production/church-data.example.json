@@ -1,0 +1,103 @@
+{
+  "setup": {
+    "createdByEmail": "admin@example.com",
+    "defaultMemberPhone": "+254700000000",
+    "defaultMeetingDay": "Wednesday",
+    "defaultMeetingTime": "19:30"
+  },
+  "users": [
+    {
+      "email": "admin@example.com",
+      "name": "Church Administrator",
+      "role": "administrator",
+      "status": "active",
+      "department": "Administration",
+      "createLogin": true
+    },
+    {
+      "email": "pastor@example.com",
+      "name": "Lead Pastor",
+      "role": "lead_pastor",
+      "status": "active",
+      "department": "Pastoral Office",
+      "createLogin": true
+    }
+  ],
+  "departments": [
+    {
+      "name": "Administration",
+      "description": "Church operations and member care",
+      "headEmail": "admin@example.com",
+      "status": "active"
+    },
+    {
+      "name": "Intercessory Ministry",
+      "description": "Prayer and pastoral intercession",
+      "status": "active"
+    }
+  ],
+  "sections": [
+    {
+      "name": "Central Section",
+      "code": "CENTRAL",
+      "pastorEmail": "pastor@example.com",
+      "status": "active"
+    }
+  ],
+  "cells": [
+    {
+      "name": "Hope Cell",
+      "sectionCode": "CENTRAL",
+      "leaderEmail": "admin@example.com",
+      "meetingDay": "Wednesday",
+      "meetingTime": "19:30",
+      "location": "House Fellowship",
+      "status": "active"
+    }
+  ],
+  "members": [
+    {
+      "fullName": "Church Administrator",
+      "email": "admin@example.com",
+      "phone": "+254700000001",
+      "role": "administrator",
+      "qrCode": "CC-PROD-ADMIN",
+      "departments": ["Administration"],
+      "sectionCode": "CENTRAL",
+      "cellGroup": "Hope Cell",
+      "userEmail": "admin@example.com",
+      "status": "active"
+    },
+    {
+      "fullName": "Lead Pastor",
+      "email": "pastor@example.com",
+      "phone": "+254700000002",
+      "role": "lead_pastor",
+      "qrCode": "CC-PROD-PASTOR",
+      "departments": ["Intercessory Ministry"],
+      "sectionCode": "CENTRAL",
+      "userEmail": "pastor@example.com",
+      "status": "active"
+    }
+  ],
+  "trainings": [
+    {
+      "code": "SOLS-101",
+      "title": "School of Leaders 1",
+      "description": "Foundation course for servant leadership and discipleship.",
+      "schedule": "Sundays after service",
+      "status": "upcoming",
+      "startDate": "2026-08-02",
+      "endDate": "2026-09-20",
+      "totalSessions": 8,
+      "requiredAttendanceRate": 80,
+      "maxEnrollment": 0,
+      "startTime": "10:00",
+      "lateGraceMinutes": 15,
+      "sessions": [
+        { "sessionNumber": 1, "sessionDate": "2026-08-02", "location": "Academy Room", "status": "scheduled" },
+        { "sessionNumber": 2, "sessionDate": "2026-08-09", "location": "Academy Room", "status": "scheduled" }
+      ]
+    }
+  ]
+}

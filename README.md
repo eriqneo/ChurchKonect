@@ -84,6 +84,37 @@ Wrangler does not need to be stored as a production dependency.
 Never place PocketBase superuser credentials, API secrets, or private keys in a `VITE_*` variable
 because Vite exposes those values in the browser bundle.
 
+## Production data setup
+
+Production church data is reconciled from an ignored JSON file rather than edited by hand in the
+PocketBase dashboard. Copy the committed template and replace the sample records with real church
+data:
+
+```bash
+cp data/production/church-data.example.json data/production/church-data.json
+```
+
+The setup file can create or update regular login accounts, departments, sections, cell groups,
+registry members, member-account links, Academy courses, and Academy sessions. It is intentionally
+non-destructive: it does not delete records that are missing from the JSON file. Existing member
+login links are preserved unless `userEmail` is explicitly provided.
+
+Always run a dry run first:
+
+```bash
+npm run backend:setup-production-data -- --email=YOUR_SUPERUSER_EMAIL --transport=curl
+```
+
+After reviewing the planned upserts, apply them:
+
+```bash
+npm run backend:setup-production-data -- --email=YOUR_SUPERUSER_EMAIL --transport=curl --apply
+```
+
+If the script generates temporary login passwords, it writes them to an ignored `0600` credentials
+JSON file under `/tmp` by default. Move those passwords through a secure church-approved channel;
+never commit them.
+
 ## PocketBase authentication module
 
 The frontend authenticates regular records from PocketBase's `users` auth collection. PocketBase

@@ -55,6 +55,7 @@ editing across many devices.
 | Certificate authority | Immutable Lead Pastor verification identity and live download revalidation | Connected; random codes and sample signatories retired |
 | Profile privacy | Account-owned visibility preference enforced by the Saints projection | Connected; acknowledged online changes with scoped local snapshot |
 | PocketBase hooks | First privileged provisioning hook is versioned with a smoke test | Source prepared; PocketHost hook deploy access pending |
+| Production data setup | Ignored JSON template plus dry-run/apply reconciler for real church data | Tooling ready; real data file required |
 | Backend configuration | PocketHost production URL and Cloudflare frontend configuration are deployed in source | Configured |
 
 The implementation now follows the selective local-first target below. Production demo seeding and
