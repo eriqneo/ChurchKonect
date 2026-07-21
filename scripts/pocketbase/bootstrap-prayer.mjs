@@ -288,7 +288,13 @@ async function main() {
     await clients.admin.collection('prayer_requests').update(request.id, { assignedIntercessors: [userRecords.intercessor.id], status: 'assigned' });
     await expectRejected('Assigned intercessor still cannot read identity-bearing request', () => clients.intercessor.collection('prayer_requests').getOne(request.id));
     const safeAssignment = await clients.intercessor.collection('prayer_assignments').getOne(assignment.id);
-    if (safeAssignment.requestDisplayName !== 'Anonymous Member' || 'submitter' in safeAssignment) throw new Error('Anonymous identity leaked through assignment projection.');
+    if (safeAssignment.requestDisplayName !== 'Anonymous Member' || Object.hasOwn(safeAssignment, 'submitter')) {
+      throw new Error(`Anonymous identity leaked through assignment projection: ${JSON.stringify({
+        requestDisplayName: safeAssignment.requestDisplayName,
+        hasSubmitter: Object.hasOwn(safeAssignment, 'submitter'),
+        keys: Object.keys(safeAssignment).sort()
+      })}`);
+    }
     if ((await clients.member.collection('prayer_assignments').getOne(assignment.id)).id !== assignment.id) throw new Error('Submitter could not see assignment metadata.');
     await expectRejected('Unrelated member cannot read assignment', () => clients.other.collection('prayer_assignments').getOne(assignment.id));
     console.log('✓ Assignment grants prayer access without exposing anonymous identity');
