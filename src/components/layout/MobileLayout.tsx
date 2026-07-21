@@ -123,6 +123,14 @@ export function MobileLayout() {
   const [isHeaderVisible, setIsHeaderVisible] = useState<boolean>(true);
   const lastScrollTopRef = useRef(0);
   const directionalTravelRef = useRef(0);
+  const drawerGestureRef = useRef({
+    tracking: false,
+    startedOpen: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0
+  });
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   
   // Custom expandable state for drawer accordion
@@ -204,6 +212,60 @@ export function MobileLayout() {
     }
   };
 
+  const isGestureBlocked = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [data-bottom-sheet], [data-ignore-drawer-swipe]'));
+  };
+
+  const handleAppTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1 || isGestureBlocked(event.target)) {
+      drawerGestureRef.current.tracking = false;
+      return;
+    }
+    const touch = event.touches[0];
+    const frameWidth = event.currentTarget.clientWidth;
+    const startedOpen = isDrawerOpen;
+    const fromLeftEdge = touch.clientX <= 28;
+    const fromDrawerArea = startedOpen && touch.clientX <= Math.min(320, frameWidth * 0.86);
+    drawerGestureRef.current = {
+      tracking: fromLeftEdge || fromDrawerArea,
+      startedOpen,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY
+    };
+  };
+
+  const handleAppTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!drawerGestureRef.current.tracking || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    drawerGestureRef.current.lastX = touch.clientX;
+    drawerGestureRef.current.lastY = touch.clientY;
+    const dx = touch.clientX - drawerGestureRef.current.startX;
+    const dy = touch.clientY - drawerGestureRef.current.startY;
+    if (Math.abs(dy) > Math.abs(dx) + 8) {
+      drawerGestureRef.current.tracking = false;
+    }
+  };
+
+  const handleAppTouchEnd = () => {
+    const gesture = drawerGestureRef.current;
+    if (!gesture.tracking) return;
+    const dx = gesture.lastX - gesture.startX;
+    const dy = gesture.lastY - gesture.startY;
+    drawerGestureRef.current.tracking = false;
+    if (Math.abs(dx) < 54 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    if (!gesture.startedOpen && dx > 0) {
+      triggerHaptic();
+      setIsDrawerOpen(true);
+      setIsHeaderVisible(true);
+    } else if (gesture.startedOpen && dx < 0) {
+      triggerHaptic();
+      setIsDrawerOpen(false);
+    }
+  };
+
   // Navigation tab bar mapping
   const tabs = [
     { id: 'home', label: 'Explore', icon: <Compass className="w-5.5 h-5.5" /> },
@@ -258,6 +320,10 @@ export function MobileLayout() {
 
       {/* Main Mobile App Frame — full-bleed on real mobile viewports, decorative device mockup on desktop preview */}
       <div
+        onTouchStart={handleAppTouchStart}
+        onTouchMove={handleAppTouchMove}
+        onTouchEnd={handleAppTouchEnd}
+        onTouchCancel={() => { drawerGestureRef.current.tracking = false; }}
         className={`w-full h-[100dvh] rounded-none border-0 shadow-none md:max-w-[412px] md:h-[892px] md:rounded-[48px] md:border-[10px] md:border-[#222226] relative overflow-hidden bg-theme-bg md:shadow-2xl flex flex-col ${
           isDark ? 'md:[box-shadow:0_25px_50px_-12px_rgba(0,0,0,0.8),0_0_100px_rgba(200,164,92,0.05)]' : 'md:[box-shadow:0_25px_50px_-12px_rgba(12,12,14,0.1),0_0_100px_rgba(123,29,49,0.03)]'
         }`}
@@ -381,7 +447,7 @@ export function MobileLayout() {
            ========================================== */}
         <div
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto pt-[calc(3.5rem+var(--safe-top))] pb-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe)+0.75rem)] md:pt-24 md:pb-28 px-4 relative z-10 scrollbar-thin scroll-smooth"
+          className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y pt-[calc(3.5rem+var(--safe-top))] pb-[calc(var(--bottom-nav-height)+var(--bottom-nav-safe)+0.75rem)] md:pt-24 md:pb-28 px-4 relative z-10 scrollbar-thin scroll-smooth"
         >
           <AnimatePresence mode="wait">
             <motion.div

@@ -695,7 +695,7 @@ export function BottomSheet({
   const sheet = (
     <AnimatePresence>
       {isOpen && (
-        <div id={id} className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden pointer-events-none">
+        <div id={id} data-bottom-sheet="true" className="fixed inset-0 z-[100] flex items-end justify-center overflow-hidden pointer-events-none">
           {/* Background Overlay */}
           <motion.div
             initial={{ opacity: 0 }}
